@@ -1,0 +1,166 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Impacket",
+  "projectDescription": "A collection of Python classes for working with network protocols",
+  "theme": "aspen",
+  "primaryColor": "#046c54",
+  "lightColor": "#8ce4f4",
+  "darkColor": "#3c9e9c",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Protocols",
+            "pages": [
+              "protocols/smb",
+              "protocols/msrpc",
+              "protocols/kerberos",
+              "protocols/ldap",
+              "protocols/netbios",
+              "protocols/mssql"
+            ]
+          },
+          {
+            "group": "Authentication",
+            "pages": [
+              "authentication/overview",
+              "authentication/ntlm",
+              "authentication/kerberos-auth",
+              "authentication/pass-the-hash"
+            ]
+          },
+          {
+            "group": "Examples & Tools",
+            "pages": [
+              "examples/overview",
+              "examples/remote-execution",
+              "examples/credential-dumping",
+              "examples/kerberos-attacks",
+              "examples/ldap-operations",
+              "examples/smb-operations"
+            ]
+          },
+          {
+            "group": "Advanced Topics",
+            "pages": [
+              "advanced/dcerpc-interfaces",
+              "advanced/dcom",
+              "advanced/packet-crafting",
+              "advanced/relay-attacks"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core Modules",
+            "pages": [
+              "api/smb",
+              "api/smbconnection",
+              "api/smbserver",
+              "api/nmb",
+              "api/ntlm"
+            ]
+          },
+          {
+            "group": "DCE/RPC",
+            "pages": [
+              "api/dcerpc/overview",
+              "api/dcerpc/transport",
+              "api/dcerpc/v5-interfaces",
+              "api/dcerpc/dcom"
+            ]
+          },
+          {
+            "group": "Kerberos",
+            "pages": [
+              "api/krb5/overview",
+              "api/krb5/asn1",
+              "api/krb5/ccache",
+              "api/krb5/crypto",
+              "api/krb5/kerberosv5"
+            ]
+          },
+          {
+            "group": "LDAP",
+            "pages": [
+              "api/ldap/overview",
+              "api/ldap/ldap",
+              "api/ldap/ldaptypes"
+            ]
+          },
+          {
+            "group": "Utilities",
+            "pages": [
+              "api/structure",
+              "api/crypto",
+              "api/dpapi",
+              "api/ese",
+              "api/winregistry"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "SMB1/2/3 client and server implementation",
+    "MS-RPC over multiple transports (TCP, SMB, HTTP)",
+    "Kerberos and NTLM authentication support",
+    "LDAP protocol implementation",
+    "Comprehensive DCE/RPC interface coverage (SAMR, LSAD, DRSUAPI, etc.)",
+    "Pass-the-Hash and Pass-the-Ticket capabilities",
+    "DPAPI and credential extraction utilities",
+    "Network packet construction and parsing",
+    "68+ example scripts for security operations"
+  ],
+  "publicApiSurface": [
+    "impacket.smb.SMB",
+    "impacket.smb3.SMB3",
+    "impacket.smbconnection.SMBConnection",
+    "impacket.smbserver.SimpleSMBServer",
+    "impacket.nmb.NetBIOS",
+    "impacket.ntlm.getNTLMSSPType1",
+    "impacket.ntlm.getNTLMSSPType3",
+    "impacket.dcerpc.v5.transport.DCERPCTransportFactory",
+    "impacket.dcerpc.v5.samr",
+    "impacket.dcerpc.v5.lsad",
+    "impacket.dcerpc.v5.drsuapi",
+    "impacket.dcerpc.v5.epm",
+    "impacket.dcerpc.v5.scmr",
+    "impacket.dcerpc.v5.tsch",
+    "impacket.dcerpc.v5.dcom.wmi",
+    "impacket.krb5.kerberosv5.getKerberosTGT",
+    "impacket.krb5.kerberosv5.getKerberosTGS",
+    "impacket.krb5.ccache.CCache",
+    "impacket.krb5.asn1.AS_REQ",
+    "impacket.krb5.asn1.TGS_REQ",
+    "impacket.ldap.ldap.LDAPConnection",
+    "impacket.ldap.ldaptypes.SR_SECURITY_DESCRIPTOR",
+    "impacket.dpapi.MasterKey",
+    "impacket.ese.ESENT_DB",
+    "impacket.structure.Structure",
+    "impacket.tds.MSSQL",
+    "secretsdump.py",
+    "smbexec.py",
+    "wmiexec.py",
+    "GetUserSPNs.py",
+    "GetNPUsers.py",
+    "ntlmrelayx.py",
+    "psexec.py",
+    "atexec.py",
+    "dcomexec.py"
+  ]
+}
