@@ -1,0 +1,521 @@
+---
+title: "DCOM & WMI"
+description: "Distributed COM and Windows Management Instrumentation implementation in Impacket"
+---
+
+## Overview
+
+Impacket provides comprehensive support for Microsoft's Distributed Component Object Model (DCOM) and Windows Management Instrumentation (WMI). These technologies enable object-oriented remote procedure calls and system management.
+
+## DCOM Architecture
+
+### Core Components
+
+From `dcomrt.py:1-150`:
+
+```python
+from impacket.dcerpc.v5 import dcomrt, transport
+
+# DCOM uses object-oriented RPC
+# Key interfaces:
+# - IRemUnknown: Remote object lifetime management
+# - IRemUnknown2: Enhanced version with query capabilities
+# - IObjectExporter: OXID resolution
+# - IActivation: Remote object activation
+```
+
+### DCOM UUIDs and CLSIDs
+
+From `dcomrt.py:48-72`:
+
+```python
+# Interface IDs
+IID_IUnknown = '00000000-0000-0000-C000-000000000046'
+IID_IClassFactory = '00000001-0000-0000-C000-000000000046'
+IID_IRemUnknown = '00000131-0000-0000-C000-000000000046'
+IID_IRemUnknown2 = '00000143-0000-0000-C000-000000000046'
+IID_IObjectExporter = '99fcfec4-5260-101b-bbcb-00aa0021347a'
+
+# Class IDs for activation
+CLSID_ActivationPropertiesIn = '00000338-0000-0000-c000-000000000046'
+CLSID_ActivationPropertiesOut = '00000339-0000-0000-c000-000000000046'
+```
+
+## Windows Management Instrumentation (WMI)
+
+### WMI Connection
+
+From `wmi.py:1-150`:
+
+```python
+from impacket.dcerpc.v5.dcom import wmi
+from impacket.dcerpc.v5.dtypes import NULL
+
+# Establish DCOM connection
+dcom = wmi.DCOM()
+iInterface = dcom.CoCreateInstanceEx(
+    wmi.CLSID_WbemLevel1Login,
+    wmi.IID_IWbemLevel1Login
+)
+
+# Login to WMI namespace
+iWbemLevel1Login = wmi.IWbemLevel1Login(iInterface)
+iWbemServices = iWbemLevel1Login.NTLMLogin(
+    '\\\\\\\\root\\\\cimv2',
+    NULL, NULL
+)
+iWbemLevel1Login.RemRelease()
+
+# Execute WMI query
+query = "SELECT * FROM Win32_Process"
+iEnumWbemClassObject = iWbemServices.ExecQuery(query)
+
+# Enumerate results
+while True:
+    try:
+        pEnum = iEnumWbemClassObject.Next(0xffffffff, 1)[0]
+        record = pEnum.getProperties()
+        print(f"Process: {record['Name']['value']}")
+        print(f"PID: {record['ProcessId']['value']}")
+    except Exception as e:
+        break
+
+# Cleanup
+iEnumWbemClassObject.RemRelease()
+iWbemServices.RemRelease()
+dcom.disconnect()
+```
+
+### Complete WMI Example
+
+```python
+from impacket.dcerpc.v5.dcom import wmi
+from impacket.dcerpc.v5.dtypes import NULL
+import sys
+
+def wmi_query(target, username, password, domain, query, namespace='root\\\\cimv2'):
+    """Execute WMI query and return results."""
+    
+    try:
+        # Create DCOM connection
+        dcom = wmi.DCOM()
+        iInterface = dcom.CoCreateInstanceEx(
+            wmi.CLSID_WbemLevel1Login,
+            wmi.IID_IWbemLevel1Login
+        )
+        
+        # Get IWbemLevel1Login interface
+        iWbemLevel1Login = wmi.IWbemLevel1Login(iInterface)
+        
+        # Login to namespace
+        iWbemServices = iWbemLevel1Login.NTLMLogin(
+            f'\\\\\\\\{namespace}',
+            NULL, NULL
+        )
+        
+        # Set authentication
+        iWbemLevel1Login.RemRelease()
+        
+        # Execute query
+        iEnumWbemClassObject = iWbemServices.ExecQuery(query)
+        
+        # Process results
+        results = []
+        while True:
+            try:
+                wbemObjects = iEnumWbemClassObject.Next(0xffffffff, 1)
+                if not wbemObjects:
+                    break
+                    
+                obj = wbemObjects[0]
+                properties = obj.getProperties()
+                results.append(properties)
+                
+            except Exception as e:
+                if 'WBEM_S_FALSE' in str(e):
+                    break
+                raise
+        
+        # Cleanup
+        iEnumWbemClassObject.RemRelease()
+        iWbemServices.RemRelease()
+        dcom.disconnect()
+        
+        return results
+        
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
+
+# Usage
+results = wmi_query(
+    target='192.168.1.10',
+    username='admin',
+    password='password',
+    domain='DOMAIN',
+    query='SELECT Name, ProcessId, ExecutablePath FROM Win32_Process'
+)
+
+for result in results:
+    print(f"Process: {result['Name']['value']}")
+    print(f"PID: {result['ProcessId']['value']}")
+    print(f"Path: {result.get('ExecutablePath', {}).get('value', 'N/A')}")
+    print("-" * 50)
+```
+
+## WMI Process Execution
+
+### Creating Remote Process
+
+```python
+from impacket.dcerpc.v5.dcom import wmi
+from impacket.dcerpc.v5.dtypes import NULL
+
+def wmi_exec(target, username, password, domain, command):
+    """Execute command via WMI."""
+    
+    dcom = wmi.DCOM()
+    iInterface = dcom.CoCreateInstanceEx(
+        wmi.CLSID_WbemLevel1Login,
+        wmi.IID_IWbemLevel1Login
+    )
+    
+    iWbemLevel1Login = wmi.IWbemLevel1Login(iInterface)
+    iWbemServices = iWbemLevel1Login.NTLMLogin(
+        '\\\\\\\\root\\\\cimv2',
+        NULL, NULL
+    )
+    iWbemLevel1Login.RemRelease()
+    
+    # Get Win32_Process class
+    win32Process, _ = iWbemServices.GetObject('Win32_Process')
+    
+    # Execute command
+    result = win32Process.Create(command, '\\\\', None)
+    processId = result.getProperties()['ProcessId']['value']
+    returnValue = result.getProperties()['ReturnValue']['value']
+    
+    print(f"Process created with PID: {processId}")
+    print(f"Return value: {returnValue}")
+    
+    # Cleanup
+    win32Process.RemRelease()
+    iWbemServices.RemRelease()
+    dcom.disconnect()
+    
+    return processId, returnValue
+
+# Execute command
+wmi_exec(
+    target='192.168.1.10',
+    username='admin',
+    password='password',
+    domain='DOMAIN',
+    command='cmd.exe /c whoami > C:\\\\output.txt'
+)
+```
+
+## Common WMI Queries
+
+### System Information
+
+```python
+# Operating system info
+query = "SELECT Caption, Version, BuildNumber, OSArchitecture FROM Win32_OperatingSystem"
+
+# Computer system
+query = "SELECT Name, Domain, Manufacturer, Model FROM Win32_ComputerSystem"
+
+# BIOS information
+query = "SELECT Manufacturer, SerialNumber, Version FROM Win32_BIOS"
+
+# Network adapters
+query = "SELECT Description, MACAddress, IPAddress FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled=True"
+```
+
+### Process Management
+
+```python
+# Running processes
+query = "SELECT Name, ProcessId, ExecutablePath, CommandLine FROM Win32_Process"
+
+# Specific process
+query = "SELECT * FROM Win32_Process WHERE Name='notepad.exe'"
+
+# Process with owner
+query = "SELECT Name, ProcessId, GetOwner() FROM Win32_Process"
+```
+
+### Service Information
+
+```python
+# All services
+query = "SELECT Name, DisplayName, State, StartMode FROM Win32_Service"
+
+# Running services
+query = "SELECT * FROM Win32_Service WHERE State='Running'"
+
+# Specific service
+query = "SELECT * FROM Win32_Service WHERE Name='WinRM'"
+```
+
+### User and Session Info
+
+```python
+# Logged on users
+query = "SELECT * FROM Win32_ComputerSystem"
+query = "SELECT UserName FROM Win32_ComputerSystem"
+
+# User accounts
+query = "SELECT Name, FullName, Disabled FROM Win32_UserAccount"
+
+# Local groups
+query = "SELECT Name, Description FROM Win32_Group WHERE LocalAccount=True"
+```
+
+### Disk and File System
+
+```python
+# Logical disks
+query = "SELECT DeviceID, VolumeName, Size, FreeSpace FROM Win32_LogicalDisk WHERE DriveType=3"
+
+# Shares
+query = "SELECT Name, Path, Description FROM Win32_Share"
+
+# Files
+query = "SELECT Name, FileSize FROM CIM_DataFile WHERE Path='\\\\Windows\\\\System32\\\\'"
+```
+
+## WMI Event Subscription
+
+### Monitoring Events
+
+```python
+from impacket.dcerpc.v5.dcom import wmi
+
+def monitor_process_creation(target, username, password, domain):
+    """Monitor process creation events."""
+    
+    dcom = wmi.DCOM()
+    iInterface = dcom.CoCreateInstanceEx(
+        wmi.CLSID_WbemLevel1Login,
+        wmi.IID_IWbemLevel1Login
+    )
+    
+    iWbemLevel1Login = wmi.IWbemLevel1Login(iInterface)
+    iWbemServices = iWbemLevel1Login.NTLMLogin(
+        '\\\\\\\\root\\\\cimv2',
+        NULL, NULL
+    )
+    iWbemLevel1Login.RemRelease()
+    
+    # Execute notification query
+    query = "SELECT * FROM __InstanceCreationEvent WITHIN 1 WHERE TargetInstance ISA 'Win32_Process'"
+    iEnumWbemClassObject = iWbemServices.ExecNotificationQuery(query)
+    
+    print("Monitoring process creation...")
+    while True:
+        try:
+            wbemObjects = iEnumWbemClassObject.Next(0xffffffff, 1)
+            if wbemObjects:
+                obj = wbemObjects[0]
+                props = obj.getProperties()
+                targetInstance = props['TargetInstance']['value']
+                print(f"Process created: {targetInstance['Name']}")
+        except KeyboardInterrupt:
+            break
+    
+    # Cleanup
+    iEnumWbemClassObject.RemRelease()
+    iWbemServices.RemRelease()
+    dcom.disconnect()
+```
+
+## DCOM Objects
+
+### ShellWindows
+
+```python
+from impacket.dcerpc.v5.dcom import wmi
+from impacket.dcerpc.v5.dcomrt import DCOMConnection
+
+# ShellWindows CLSID
+CLSID_ShellWindows = '9BA05972-F6A8-11CF-A442-00A0C90A8F39'
+IID_IShellWindows = '85CB6900-4D95-11CF-960C-0080C7F4EE85'
+
+dcom = DCOMConnection('192.168.1.10', 'admin', 'password', 'DOMAIN')
+iInterface = dcom.CoCreateInstanceEx(CLSID_ShellWindows, IID_IShellWindows)
+# Use ShellWindows interface...
+```
+
+### ShellBrowserWindow
+
+```python
+from impacket.dcerpc.v5.dcom import wmi
+
+CLSID_ShellBrowserWindow = 'C08AFD90-F2A1-11D1-8455-00A0C91F3880'
+IID_IShellBrowser = '02BA3B52-0547-11D1-B833-00C04FC9B31F'
+
+dcom = DCOMConnection('192.168.1.10', 'admin', 'password', 'DOMAIN')
+iInterface = dcom.CoCreateInstanceEx(
+    CLSID_ShellBrowserWindow,
+    IID_IShellBrowser
+)
+# Use ShellBrowser interface...
+```
+
+## WMI Namespaces
+
+Common WMI namespaces:
+
+| Namespace | Description |
+|-----------|-------------|
+| `root\\cimv2` | Core WMI classes (default) |
+| `root\\default` | Default namespace |
+| `root\\SecurityCenter` | Security center information |
+| `root\\SecurityCenter2` | Security center v2 (Vista+) |
+| `root\\Microsoft\\Windows\\Defender` | Windows Defender |
+| `root\\directory\\LDAP` | Active Directory |
+| `root\\WMI` | WMI infrastructure |
+| `root\\RSOP` | Resultant Set of Policy |
+| `root\\CIMV2\\Applications` | Installed applications |
+
+## Authentication
+
+### NTLM Authentication
+
+```python
+from impacket.dcerpc.v5.dcom.wmi import DCOM
+from impacket.dcerpc.v5 import transport
+
+# Standard NTLM
+dcom = DCOM(
+    remoteName='192.168.1.10',
+    remoteHost='192.168.1.10',
+    username='admin',
+    password='password',
+    domain='DOMAIN'
+)
+
+# With NTLM hash (Pass-the-Hash)
+dcom = DCOM(
+    remoteName='192.168.1.10',
+    remoteHost='192.168.1.10',
+    username='admin',
+    password='',
+    domain='DOMAIN',
+    lmhash='',
+    nthash='aad3b435b51404eeaad3b435b51404ee'
+)
+```
+
+### Kerberos Authentication
+
+```python
+dcom = DCOM(
+    remoteName='DC01.domain.com',
+    remoteHost='192.168.1.10',
+    username='admin',
+    password='password',
+    domain='DOMAIN.COM',
+    doKerberos=True,
+    kdcHost='dc.domain.com'
+)
+```
+
+## Error Handling
+
+```python
+from impacket.dcerpc.v5.dcom.wmi import DCERPCSessionError
+from impacket import hresult_errors
+
+try:
+    iEnumWbemClassObject = iWbemServices.ExecQuery(query)
+    results = iEnumWbemClassObject.Next(0xffffffff, 10)
+except DCERPCSessionError as e:
+    error_code = e.get_error_code()
+    if error_code in hresult_errors.ERROR_MESSAGES:
+        error_msg = hresult_errors.ERROR_MESSAGES[error_code]
+        print(f"WMI Error: {error_msg}")
+    else:
+        print(f"Unknown error: 0x{error_code:x}")
+except Exception as e:
+    print(f"Error: {e}")
+```
+
+## Common HRESULT Codes
+
+| Code | Name | Description |
+|------|------|-------------|
+| `0x80041001` | `WBEM_E_FAILED` | Call failed |
+| `0x80041002` | `WBEM_E_NOT_FOUND` | Object not found |
+| `0x80041003` | `WBEM_E_ACCESS_DENIED` | Access denied |
+| `0x80041010` | `WBEM_E_INVALID_CLASS` | Invalid class |
+| `0x80041017` | `WBEM_E_INVALID_QUERY` | Invalid query |
+| `0x80041021` | `WBEM_E_INVALID_PARAMETER` | Invalid parameter |
+| `0x80070005` | `E_ACCESSDENIED` | General access denied |
+
+## Best Practices
+
+### Connection Management
+
+```python
+class WMIConnection:
+    """Context manager for WMI connections."""
+    
+    def __init__(self, target, username, password, domain, namespace='root\\\\cimv2'):
+        self.target = target
+        self.username = username
+        self.password = password
+        self.domain = domain
+        self.namespace = namespace
+        self.dcom = None
+        self.iWbemServices = None
+    
+    def __enter__(self):
+        self.dcom = wmi.DCOM()
+        iInterface = self.dcom.CoCreateInstanceEx(
+            wmi.CLSID_WbemLevel1Login,
+            wmi.IID_IWbemLevel1Login
+        )
+        
+        iWbemLevel1Login = wmi.IWbemLevel1Login(iInterface)
+        self.iWbemServices = iWbemLevel1Login.NTLMLogin(
+            f'\\\\\\\\{self.namespace}',
+            NULL, NULL
+        )
+        iWbemLevel1Login.RemRelease()
+        
+        return self.iWbemServices
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.iWbemServices:
+            self.iWbemServices.RemRelease()
+        if self.dcom:
+            self.dcom.disconnect()
+
+# Usage
+with WMIConnection('192.168.1.10', 'admin', 'password', 'DOMAIN') as wmi_svc:
+    results = wmi_svc.ExecQuery('SELECT * FROM Win32_Process')
+    # Process results...
+```
+
+### Query Optimization
+
+```python
+# Specify only needed properties
+query = "SELECT Name, ProcessId FROM Win32_Process"  # Good
+query = "SELECT * FROM Win32_Process"  # Less efficient
+
+# Use WHERE clause to filter
+query = "SELECT * FROM Win32_Process WHERE Name='explorer.exe'"
+
+# Limit associations
+query = "ASSOCIATORS OF {Win32_Service.Name='WinRM'} WHERE ResultClass=Win32_Process"
+```
+
+## See Also
+
+- [DCE/RPC Overview](/api/dcerpc/overview)
+- [Transport Layer](/api/dcerpc/transport)
+- [V5 Interfaces](/api/dcerpc/v5-interfaces)

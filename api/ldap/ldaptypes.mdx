@@ -1,0 +1,351 @@
+---
+title: 'LDAP Types'
+description: 'Security descriptor and ACL structures for LDAP'
+---
+
+## Overview
+
+The `ldaptypes` module provides structures for working with Windows security descriptors, Access Control Lists (ACLs), and Security Identifiers (SIDs) in their LDAP/non-RPC binary format.
+
+## Security Identifiers
+
+### LDAP_SID
+
+Represents a Security Identifier in LDAP format.
+
+```python
+from impacket.ldap.ldaptypes import LDAP_SID
+
+sid = LDAP_SID(data=binary_sid_data)
+print(sid.formatCanonical())  # S-1-5-21-...
+```
+
+#### Methods
+
+**formatCanonical()**
+
+Returns the SID in canonical string format.
+
+```python
+sid_string = sid.formatCanonical()
+# Returns: 'S-1-5-21-3623811015-3361044348-30300820-1013'
+```
+
+**fromCanonical(canonical)**
+
+Parse a canonical SID string into the structure.
+
+```python
+sid = LDAP_SID()
+sid.fromCanonical('S-1-5-21-3623811015-3361044348-30300820-1013')
+```
+
+## Security Descriptors
+
+### SR_SECURITY_DESCRIPTOR
+
+Self-relative security descriptor as defined in MS-DTYP 2.4.6.
+
+```python
+from impacket.ldap.ldaptypes import SR_SECURITY_DESCRIPTOR
+
+sd = SR_SECURITY_DESCRIPTOR(data=descriptor_bytes)
+```
+
+#### Structure Fields
+
+- **Revision** (byte): Descriptor revision (usually 1)
+- **Control** (short): Control flags
+- **OwnerSid** (LDAP_SID): Owner SID
+- **GroupSid** (LDAP_SID): Primary group SID
+- **Sacl** (ACL): System ACL
+- **Dacl** (ACL): Discretionary ACL
+
+#### Example
+
+```python
+# Read security descriptor from LDAP
+result = conn.search(
+    searchFilter='(sAMAccountName=admin)',
+    attributes=['nTSecurityDescriptor']
+)
+
+for entry in result:
+    for attr in entry['attributes']:
+        if str(attr['type']) == 'nTSecurityDescriptor':
+            sd_data = bytes(attr['vals'][0])
+            sd = SR_SECURITY_DESCRIPTOR(data=sd_data)
+            
+            print(f"Owner: {sd['OwnerSid'].formatCanonical()}")
+            print(f"Group: {sd['GroupSid'].formatCanonical()}")
+```
+
+## Access Control Lists
+
+### ACL
+
+Represents an Access Control List containing multiple ACEs.
+
+```python
+from impacket.ldap.ldaptypes import ACL
+
+acl = ACL(data=acl_bytes)
+print(f"ACE Count: {acl['AceCount']}")
+
+for ace in acl.aces:
+    print(f"ACE Type: {ace['TypeName']}")
+    print(f"SID: {ace['Ace']['Sid'].formatCanonical()}")
+```
+
+#### Structure Fields
+
+- **AclRevision** (byte): ACL revision
+- **AceCount** (short): Number of ACEs
+- **aces** (list): List of ACE objects
+
+## Access Control Entries
+
+### ACE
+
+Base ACE structure. The actual ACE type is determined by the AceType field.
+
+```python
+from impacket.ldap.ldaptypes import ACE
+
+ace = ACE(data=ace_bytes)
+print(f"Type: {ace['TypeName']}")
+print(f"Flags: 0x{ace['AceFlags']:02x}")
+```
+
+#### ACE Flags
+
+```python
+from impacket.ldap.ldaptypes import ACE
+
+CONTAINER_INHERIT_ACE = 0x02
+INHERIT_ONLY_ACE = 0x08
+INHERITED_ACE = 0x10
+OBJECT_INHERIT_ACE = 0x01
+
+if ace.hasFlag(ACE.CONTAINER_INHERIT_ACE):
+    print("ACE inherits to child containers")
+```
+
+### ACCESS_ALLOWED_ACE
+
+Grants access rights to a trustee.
+
+```python
+from impacket.ldap.ldaptypes import ACCESS_ALLOWED_ACE
+
+# ACE Type: 0x00
+ace_data = ace['Ace']  # Parsed from ACE
+mask = ace_data['Mask']
+sid = ace_data['Sid']
+
+print(f"Allowed rights: 0x{mask['Mask']:08x}")
+print(f"Trustee: {sid.formatCanonical()}")
+```
+
+### ACCESS_ALLOWED_OBJECT_ACE  
+
+Object-specific access control for Active Directory.
+
+```python
+from impacket.ldap.ldaptypes import ACCESS_ALLOWED_OBJECT_ACE
+
+# ACE Type: 0x05
+ace_data = ace['Ace']
+
+if ace_data.hasFlag(ACCESS_ALLOWED_OBJECT_ACE.ACE_OBJECT_TYPE_PRESENT):
+    # ObjectType is a GUID identifying the property/extended right
+    object_guid = ace_data['ObjectType']
+    print(f"Object GUID: {object_guid.hex()}")
+
+if ace_data.hasFlag(ACCESS_ALLOWED_OBJECT_ACE.ACE_INHERITED_OBJECT_TYPE_PRESENT):
+    # Inherited object type
+    inherited_guid = ace_data['InheritedObjectType']
+```
+
+#### Object ACE Rights
+
+```python
+from impacket.ldap.ldaptypes import ACCESS_ALLOWED_OBJECT_ACE
+
+ADS_RIGHT_DS_CONTROL_ACCESS = 0x00000100  # Extended rights
+ADS_RIGHT_DS_CREATE_CHILD = 0x00000001    # Create child objects
+ADS_RIGHT_DS_DELETE_CHILD = 0x00000002    # Delete child objects  
+ADS_RIGHT_DS_READ_PROP = 0x00000010       # Read property
+ADS_RIGHT_DS_WRITE_PROP = 0x00000020      # Write property
+ADS_RIGHT_DS_SELF = 0x00000008            # Self modification
+```
+
+### ACCESS_DENIED_ACE
+
+Denies access rights to a trustee.
+
+```python
+# ACE Type: 0x01
+# Structure identical to ACCESS_ALLOWED_ACE
+```
+
+### ACCESS_DENIED_OBJECT_ACE
+
+Object-specific access denial.
+
+```python
+# ACE Type: 0x06  
+# Structure identical to ACCESS_ALLOWED_OBJECT_ACE
+```
+
+## Access Masks
+
+### ACCESS_MASK
+
+Represents access rights in an ACE.
+
+```python
+from impacket.ldap.ldaptypes import ACCESS_MASK
+
+mask = ACCESS_MASK()
+mask['Mask'] = 0x001f01ff
+
+if mask.hasPriv(ACCESS_MASK.GENERIC_ALL):
+    print("Has full control")
+```
+
+#### Standard Rights
+
+```python
+GENERIC_READ = 0x80000000
+GENERIC_WRITE = 0x40000000
+GENERIC_EXECUTE = 0x20000000
+GENERIC_ALL = 0x10000000
+
+DELETE = 0x00010000
+READ_CONTROL = 0x00020000
+WRITE_DACL = 0x00040000
+WRITE_OWNER = 0x00080000
+```
+
+#### Methods
+
+**hasPriv(priv)**
+
+Check if a specific privilege is set.
+
+```python
+if mask.hasPriv(ACCESS_MASK.WRITE_DACL):
+    print("Can modify DACL")
+```
+
+**setPriv(priv)**
+
+Set a specific privilege.
+
+```python
+mask.setPriv(ACCESS_MASK.READ_CONTROL)
+```
+
+**removePriv(priv)**
+
+Remove a specific privilege.
+
+```python
+mask.removePriv(ACCESS_MASK.WRITE_OWNER)
+```
+
+## Security Descriptor Flags
+
+### LDAP_SERVER_SD_FLAGS
+
+Control which parts of the security descriptor to retrieve.
+
+```python
+from impacket.ldap.ldaptypes import LDAP_SERVER_SD_FLAGS
+from impacket.ldap.ldapasn1 import Control
+
+# Request only DACL
+sd_flags_control = Control()
+sd_flags_control['controlType'] = '1.2.840.113556.1.4.801'
+sd_flags_control['controlValue'] = struct.pack('<I', 
+    LDAP_SERVER_SD_FLAGS.OWNER_SECURITY_INFORMATION.value |
+    LDAP_SERVER_SD_FLAGS.DACL_SECURITY_INFORMATION.value
+)
+
+results = conn.search(
+    searchFilter='(sAMAccountName=user)',
+    attributes=['nTSecurityDescriptor'],
+    searchControls=[sd_flags_control]
+)
+```
+
+#### Flags
+
+- **OWNER_SECURITY_INFORMATION** (0x1): Owner SID
+- **GROUP_SECURITY_INFORMATION** (0x2): Group SID  
+- **DACL_SECURITY_INFORMATION** (0x4): DACL
+- **SACL_SECURITY_INFORMATION** (0x8): SACL
+
+## Object Type GUIDs
+
+### OBJECTTYPE_GUID_MAP
+
+Common object class GUIDs for Active Directory.
+
+```python
+from impacket.ldap.ldaptypes import OBJECTTYPE_GUID_MAP
+
+user_guid = OBJECTTYPE_GUID_MAP[b'user']
+# 'bf967aba-0de6-11d0-a285-00aa003049e2'
+
+group_guid = OBJECTTYPE_GUID_MAP[b'group']  
+# 'bf967a9c-0de6-11d0-a285-00aa003049e2'
+```
+
+## Complete Example
+
+```python
+from impacket.ldap import ldap
+from impacket.ldap.ldaptypes import (
+    SR_SECURITY_DESCRIPTOR, ACE, ACCESS_ALLOWED_OBJECT_ACE
+)
+
+# Connect and authenticate
+conn = ldap.LDAPConnection('ldap://dc.example.com')
+conn.login('admin', 'password', 'EXAMPLE')
+
+# Query security descriptor
+results = conn.search(
+    searchFilter='(sAMAccountName=testuser)',
+    attributes=['nTSecurityDescriptor']
+)
+
+for entry in results:
+    if not entry.get('objectName'):
+        continue
+        
+    for attr in entry['attributes']:
+        if str(attr['type']) == 'nTSecurityDescriptor':
+            sd_data = bytes(attr['vals'][0])
+            sd = SR_SECURITY_DESCRIPTOR(data=sd_data)
+            
+            print(f"Owner: {sd['OwnerSid'].formatCanonical()}")
+            
+            # Parse DACL
+            dacl = sd['Dacl']
+            print(f"DACL has {dacl['AceCount']} ACEs")
+            
+            for ace in dacl.aces:
+                ace_info = ace['Ace']
+                print(f"  Type: {ace['TypeName']}")
+                print(f"  SID: {ace_info['Sid'].formatCanonical()}")
+                print(f"  Mask: 0x{ace_info['Mask']['Mask']:08x}")
+                
+                # Check for object ACEs
+                if ace['AceType'] == ACCESS_ALLOWED_OBJECT_ACE.ACE_TYPE:
+                    if ace_info.hasFlag(ACCESS_ALLOWED_OBJECT_ACE.ACE_OBJECT_TYPE_PRESENT):
+                        print(f"  Object GUID: {ace_info['ObjectType'].hex()}")
+
+conn.close()
+```

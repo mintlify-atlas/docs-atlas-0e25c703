@@ -1,0 +1,996 @@
+---
+title: "Kerberos Cryptography"
+description: "Complete reference for Kerberos encryption, decryption, key derivation, checksums, and cryptographic operations"
+---
+
+## Overview
+
+The `impacket.krb5.crypto` module provides cryptographic primitives for Kerberos v5, implementing encryption/decryption, key derivation, checksum operations, and string-to-key functions for multiple cipher suites.
+
+## Module Location
+
+```python
+from impacket.krb5.crypto import (
+    Key, encrypt, decrypt, string_to_key,
+    make_checksum, verify_checksum,
+    random_to_key, prf, cf2
+)
+```
+
+**Source**: `impacket/krb5/crypto.py`
+
+## Supported Encryption Types
+
+### Enctype Class
+
+Encryption type identifiers:
+
+```python
+class Enctype:
+    DES_CRC = 1      # DES-CBC-CRC (deprecated)
+    DES_MD4 = 2      # DES-CBC-MD4 (deprecated)
+    DES_MD5 = 3      # DES-CBC-MD5 (deprecated)
+    DES3 = 16        # DES3-CBC-SHA1
+    AES128 = 17      # AES128-CTS-HMAC-SHA1-96
+    AES256 = 18      # AES256-CTS-HMAC-SHA1-96 (recommended)
+    RC4 = 23         # RC4-HMAC
+```
+
+### Cksumtype Class
+
+Checksum type identifiers:
+
+```python
+class Cksumtype:
+    CRC32 = 1
+    MD4 = 2
+    MD4_DES = 3
+    MD5 = 7
+    MD5_DES = 8
+    SHA1 = 9
+    SHA1_DES3 = 12
+    SHA1_AES128 = 15
+    SHA1_AES256 = 16
+    HMAC_MD5 = -138  # RC4-HMAC checksum
+```
+
+## Key Class
+
+Represents a Kerberos encryption key.
+
+```python
+class Key:
+    def __init__(self, enctype, contents)
+```
+
+**Attributes**:
+- `enctype`: Encryption type identifier
+- `contents`: Raw key bytes
+
+**Example**:
+```python
+from impacket.krb5.crypto import Key, Enctype
+from binascii import unhexlify
+
+# Create AES256 key
+key = Key(
+    Enctype.AES256,
+    unhexlify('a1b2c3d4e5f6...')  # 32 bytes for AES256
+)
+
+print(f"Enctype: {key.enctype}")
+print(f"Key length: {len(key.contents)}")
+```
+
+**Key Sizes**:
+- DES: 8 bytes
+- DES3: 24 bytes
+- AES128: 16 bytes
+- AES256: 32 bytes
+- RC4: 16 bytes
+
+## String-to-Key Operations
+
+### string_to_key Function
+
+Derive key from password and salt.
+
+```python
+def string_to_key(enctype, string, salt, params=None)
+```
+
+**Parameters**:
+- `enctype`: Encryption type (int)
+- `string`: Password (str or bytes)
+- `salt`: Salt value (str or bytes)
+- `params`: Optional algorithm parameters
+
+**Returns**: `Key` object
+
+**Example**:
+```python
+from impacket.krb5.crypto import string_to_key, Enctype
+
+# Derive AES256 key
+key = string_to_key(
+    Enctype.AES256,
+    'MyPassword123',
+    'DOMAIN.LOCALuser',
+    params=b'\x00\x00\x10\x00'  # 4096 iterations
+)
+
+print(f"Derived key: {key.contents.hex()}")
+```
+
+### Salt Generation
+
+Standard Kerberos salt formats:
+
+```python
+# User principal salt
+username = 'john'
+domain = 'DOMAIN.LOCAL'
+salt = f"{domain.upper()}{username}"
+
+# Service principal salt (machine accounts)
+computername = 'SERVER'
+domain = 'domain.local'
+salt = f"{domain.upper()}host{computername.lower()}.{domain.lower()}"
+
+# Examples:
+# User: "DOMAIN.LOCALjohn"
+# Computer: "DOMAIN.LOCALhostserver.domain.local"
+```
+
+### Algorithm-Specific Details
+
+#### AES String-to-Key (PBKDF2)
+
+```python
+from impacket.krb5.crypto import string_to_key, Enctype
+import struct
+
+# Default 4096 iterations
+iterations = 4096
+params = struct.pack('>L', iterations)
+
+key = string_to_key(
+    Enctype.AES256,
+    'password',
+    'DOMAIN.LOCALuser',
+    params=params
+)
+```
+
+**Process**:
+1. PBKDF2-HMAC-SHA1(password, salt, iterations, keysize)
+2. Derive using "kerberos" constant
+
+#### RC4 String-to-Key
+
+```python
+key = string_to_key(
+    Enctype.RC4,
+    'Password123',
+    '',  # Salt ignored for RC4
+    params=None
+)
+```
+
+**Process**: MD4(UTF-16LE(password))
+
+#### DES3 String-to-Key
+
+```python
+key = string_to_key(
+    Enctype.DES3,
+    'password',
+    'DOMAIN.LOCALuser',
+    params=None
+)
+```
+
+**Process**:
+1. n-fold(password + salt, 21)
+2. Random-to-key with parity bits
+3. Derive with "kerberos" constant
+
+## Encryption Operations
+
+### encrypt Function
+
+Encrypt plaintext with key.
+
+```python
+def encrypt(key, keyusage, plaintext, confounder=None)
+```
+
+**Parameters**:
+- `key`: `Key` object
+- `keyusage`: Key usage number (int)
+- `plaintext`: Data to encrypt (bytes)
+- `confounder`: Optional confounder (None = random)
+
+**Returns**: Ciphertext bytes
+
+**Example**:
+```python
+from impacket.krb5.crypto import encrypt, string_to_key, Enctype
+
+key = string_to_key(Enctype.AES256, 'password', 'DOMAIN.LOCALuser')
+
+# Encrypt timestamp for AS-REQ
+plaintext = b'encoded_timestamp_data'
+ciphertext = encrypt(
+    key,
+    1,  # Key usage: AS-REQ PA-ENC-TIMESTAMP
+    plaintext,
+    confounder=None  # Auto-generate
+)
+
+print(f"Ciphertext: {ciphertext.hex()}")
+```
+
+### decrypt Function
+
+Decrypt ciphertext with key.
+
+```python
+def decrypt(key, keyusage, ciphertext)
+```
+
+**Parameters**:
+- `key`: `Key` object
+- `keyusage`: Key usage number (int)
+- `ciphertext`: Encrypted data (bytes)
+
+**Returns**: Plaintext bytes
+
+**Raises**: `InvalidChecksum` if integrity check fails
+
+**Example**:
+```python
+from impacket.krb5.crypto import decrypt, InvalidChecksum
+
+try:
+    plaintext = decrypt(
+        key,
+        3,  # Key usage: AS-REP enc-part
+        ciphertext
+    )
+    print(f"Decrypted: {plaintext.hex()}")
+except InvalidChecksum:
+    print("Decryption failed: invalid checksum")
+```
+
+## Key Usage Numbers
+
+Standard key usage values from RFC 4120:
+
+```python
+# Ticket encryption
+KU_TICKET = 2                    # Ticket enc-part
+
+# AS-REQ/AS-REP
+KU_AS_REQ_PA_ENC_TIMESTAMP = 1   # PA-ENC-TIMESTAMP
+KU_AS_REP_ENC_PART = 3           # AS-REP enc-part
+
+# TGS-REQ/TGS-REP
+KU_TGS_REQ_AUTH = 7              # TGS-REQ Authenticator
+KU_TGS_REP_ENC_PART = 8          # TGS-REP enc-part
+
+# AP-REQ/AP-REP
+KU_AP_REQ_AUTH = 11              # AP-REQ Authenticator
+KU_AP_REP_ENC_PART = 12          # AP-REP enc-part
+
+# Other
+KU_KRB_PRIV = 13                 # KRB-PRIV enc-part
+KU_KRB_CRED = 14                 # KRB-CRED enc-part
+KU_KRB_SAFE_CKSUM = 15           # KRB-SAFE checksum
+```
+
+**Example Usage**:
+```python
+# Decrypt AS-REP
+plaintext = decrypt(key, 3, asrep_ciphertext)
+
+# Encrypt TGS-REQ authenticator
+ciphertext = encrypt(sessionKey, 7, authenticator_data)
+
+# Decrypt TGS-REP
+plaintext = decrypt(sessionKey, 8, tgsrep_ciphertext)
+```
+
+## Checksum Operations
+
+### make_checksum Function
+
+Compute keyed checksum.
+
+```python
+def make_checksum(cksumtype, key, keyusage, text)
+```
+
+**Parameters**:
+- `cksumtype`: Checksum type (int)
+- `key`: `Key` object
+- `keyusage`: Key usage number (int)
+- `text`: Data to checksum (bytes)
+
+**Returns**: Checksum bytes
+
+**Example**:
+```python
+from impacket.krb5.crypto import make_checksum, Cksumtype
+
+cksum = make_checksum(
+    Cksumtype.SHA1_AES256,
+    key,
+    11,  # AP-REQ authenticator
+    plaintext
+)
+
+print(f"Checksum: {cksum.hex()}")
+print(f"Length: {len(cksum)} bytes")
+```
+
+### verify_checksum Function
+
+Verify keyed checksum.
+
+```python
+def verify_checksum(cksumtype, key, keyusage, text, cksum)
+```
+
+**Parameters**:
+- `cksumtype`: Checksum type (int)
+- `key`: `Key` object
+- `keyusage`: Key usage number (int)
+- `text`: Data that was checksummed (bytes)
+- `cksum`: Checksum to verify (bytes)
+
+**Raises**: `InvalidChecksum` if verification fails
+
+**Example**:
+```python
+from impacket.krb5.crypto import verify_checksum, InvalidChecksum, Cksumtype
+
+try:
+    verify_checksum(
+        Cksumtype.SHA1_AES256,
+        key,
+        11,
+        plaintext,
+        received_checksum
+    )
+    print("Checksum valid")
+except InvalidChecksum:
+    print("Checksum verification failed")
+```
+
+## Advanced Key Operations
+
+### random_to_key Function
+
+Convert random bytes to key.
+
+```python
+def random_to_key(enctype, seed)
+```
+
+**Parameters**:
+- `enctype`: Encryption type (int)
+- `seed`: Random seed bytes (seedsize length)
+
+**Returns**: `Key` object
+
+**Example**:
+```python
+from impacket.krb5.crypto import random_to_key, get_random_bytes, Enctype
+
+# Generate random AES256 key
+seed = get_random_bytes(32)  # AES256 seed size
+key = random_to_key(Enctype.AES256, seed)
+
+print(f"Key: {key.contents.hex()}")
+```
+
+**Seed Sizes**:
+- DES: 8 bytes
+- DES3: 21 bytes
+- AES128: 16 bytes
+- AES256: 32 bytes
+- RC4: 16 bytes
+
+### prf Function
+
+Pseudo-Random Function for key derivation.
+
+```python
+def prf(key, string)
+```
+
+**Parameters**:
+- `key`: `Key` object
+- `string`: Input string (bytes)
+
+**Returns**: Output bytes
+
+**Example**:
+```python
+from impacket.krb5.crypto import prf
+
+# Derive key material
+output = prf(key, b'specific-usage')
+print(f"PRF output: {output.hex()}")
+```
+
+### cf2 Function
+
+Combine two keys (RFC 6113 KRB-FX-CF2).
+
+```python
+def cf2(enctype, key1, key2, pepper1, pepper2)
+```
+
+**Parameters**:
+- `enctype`: Target encryption type
+- `key1`: First `Key` object
+- `key2`: Second `Key` object
+- `pepper1`: First pepper (bytes)
+- `pepper2`: Second pepper (bytes)
+
+**Returns**: Combined `Key` object
+
+**Example**:
+```python
+from impacket.krb5.crypto import cf2, Enctype
+
+combined_key = cf2(
+    Enctype.AES256,
+    key1,
+    key2,
+    b'first-pepper',
+    b'second-pepper'
+)
+```
+
+**Use Case**: FAST armor key generation
+
+## Cipher Suite Details
+
+### AES Encryption (Simplified Profile)
+
+AES128 and AES256 use RFC 3961 simplified profile:
+
+**Encryption Process**:
+1. Derive Ki = DK(key, usage | 0x55)
+2. Derive Ke = DK(key, usage | 0xAA)
+3. Generate random confounder (16 bytes)
+4. Plaintext' = confounder + plaintext (zero-padded)
+5. HMAC = HMAC-SHA1(Ki, plaintext')
+6. Ciphertext = E(Ke, plaintext') + HMAC[0:12]
+
+**Decryption Process**:
+1. Derive Ki and Ke
+2. Split ciphertext and MAC
+3. Decrypt: plaintext' = D(Ke, ciphertext)
+4. Verify: HMAC-SHA1(Ki, plaintext')[0:12] == MAC
+5. Remove confounder: plaintext = plaintext'[16:]
+
+**Example**:
+```python
+from impacket.krb5.crypto import _AES256CTS
+
+# Direct cipher access
+cipher = _AES256CTS()
+plaintext = b'test data'
+confounder = get_random_bytes(16)
+
+# Encrypt with key usage
+ciphertext = cipher.encrypt(key, 11, plaintext, confounder)
+
+# Decrypt
+recovered = cipher.decrypt(key, 11, ciphertext)
+assert recovered == plaintext
+```
+
+### RC4 Encryption
+
+RC4-HMAC (also known as ARCFOUR-HMAC-MD5):
+
+**Encryption Process**:
+1. Ki = HMAC-MD5(key, usage)
+2. Checksum = HMAC-MD5(Ki, confounder + plaintext)
+3. Ke = HMAC-MD5(Ki, checksum)
+4. Ciphertext = checksum + RC4(Ke, confounder + plaintext)
+
+**Example**:
+```python
+from impacket.krb5.crypto import _RC4
+
+cipher = _RC4()
+key = cipher.string_to_key('Password123', '', None)
+
+ciphertext = cipher.encrypt(key, 11, b'test data', None)
+plaintext = cipher.decrypt(key, 11, ciphertext)
+```
+
+### DES3 Encryption
+
+Triple DES with CBC mode:
+
+**Encryption Process**:
+1. Derive Ki = DK(key, usage | 0x55)
+2. Derive Ke = DK(key, usage | 0xAA)
+3. Generate random confounder (8 bytes)
+4. Plaintext' = confounder + plaintext (zero-padded to 8-byte boundary)
+5. HMAC = HMAC-SHA1(Ki, plaintext')
+6. Ciphertext = E-DES3-CBC(Ke, plaintext') + HMAC
+
+**Example**:
+```python
+from impacket.krb5.crypto import _DES3CBC
+
+cipher = _DES3CBC()
+key = cipher.string_to_key('password', 'DOMAIN.LOCALuser', None)
+
+ciphertext = cipher.encrypt(key, 11, b'test data', None)
+plaintext = cipher.decrypt(key, 11, ciphertext)
+```
+
+## Key Derivation
+
+### DK Function (Key Derivation)
+
+Internal function for deriving keys:
+
+```python
+# Conceptual - internal to cipher classes
+def derive(cls, key, constant):
+    plaintext = nfold(constant, blocksize)
+    rndseed = b''
+    while len(rndseed) < seedsize:
+        ciphertext = basic_encrypt(key, plaintext)
+        rndseed += ciphertext
+        plaintext = ciphertext
+    return random_to_key(rndseed[0:seedsize])
+```
+
+**Constants**:
+- `usage | 0x55`: Integrity key (Ki)
+- `usage | 0xAA`: Encryption key (Ke)
+- `usage | 0x99`: Checksum key (Kc)
+- `b'kerberos'`: Base key derivation
+
+**Example** (using public API):
+```python
+from impacket.krb5.crypto import _AES256CTS
+import struct
+
+cipher = _AES256CTS()
+
+# Derive encryption key for usage 11
+constant = struct.pack('>IB', 11, 0xAA)
+ke = cipher.derive(key, constant)
+
+# Derive integrity key
+constant = struct.pack('>IB', 11, 0x55)
+ki = cipher.derive(key, constant)
+```
+
+## Practical Examples
+
+### Generate Kerberos Keys
+
+```python
+from impacket.krb5.crypto import string_to_key, Enctype
+from binascii import hexlify
+
+def generate_keys(password, username, domain):
+    """
+    Generate Kerberos keys for user.
+    
+    Args:
+        password: User password
+        username: User principal name
+        domain: Kerberos realm
+    
+    Returns:
+        Dict of encryption type -> key hex
+    """
+    # Construct salt
+    salt = f"{domain.upper()}{username}"
+    
+    keys = {}
+    
+    # AES256 (recommended)
+    key = string_to_key(Enctype.AES256, password, salt)
+    keys['AES256'] = hexlify(key.contents).decode()
+    
+    # AES128
+    key = string_to_key(Enctype.AES128, password, salt)
+    keys['AES128'] = hexlify(key.contents).decode()
+    
+    # RC4 (NT hash)
+    key = string_to_key(Enctype.RC4, password, '')
+    keys['RC4'] = hexlify(key.contents).decode()
+    
+    return keys
+
+# Usage
+keys = generate_keys('P@ssw0rd', 'john', 'DOMAIN.LOCAL')
+for enctype, key_hex in keys.items():
+    print(f"{enctype}: {key_hex}")
+```
+
+### Encrypt/Decrypt Timestamp
+
+```python
+from impacket.krb5.crypto import encrypt, decrypt, string_to_key, Enctype
+from impacket.krb5.types import KerberosTime
+from impacket.krb5.asn1 import PA_ENC_TS_ENC
+from pyasn1.codec.der import encoder, decoder
+import datetime
+
+def create_encrypted_timestamp(password, salt):
+    """
+    Create encrypted timestamp for AS-REQ.
+    """
+    # Derive key
+    key = string_to_key(Enctype.AES256, password, salt)
+    
+    # Build timestamp
+    pa_enc_ts = PA_ENC_TS_ENC()
+    now = datetime.datetime.now(datetime.timezone.utc)
+    pa_enc_ts['patimestamp'] = KerberosTime.to_asn1(now)
+    pa_enc_ts['pausec'] = now.microsecond
+    
+    # Encode and encrypt
+    plaintext = encoder.encode(pa_enc_ts)
+    ciphertext = encrypt(key, 1, plaintext)  # Key usage 1
+    
+    return ciphertext, key
+
+def decrypt_timestamp(ciphertext, key):
+    """
+    Decrypt and parse timestamp.
+    """
+    plaintext = decrypt(key, 1, ciphertext)
+    pa_enc_ts = decoder.decode(plaintext, asn1Spec=PA_ENC_TS_ENC())[0]
+    
+    timestamp = KerberosTime.from_asn1(pa_enc_ts['patimestamp'])
+    microseconds = int(pa_enc_ts['pausec'])
+    
+    return timestamp, microseconds
+
+# Usage
+ciphertext, key = create_encrypted_timestamp(
+    'password',
+    'DOMAIN.LOCALuser'
+)
+
+timestamp, usec = decrypt_timestamp(ciphertext, key)
+print(f"Timestamp: {timestamp}.{usec}")
+```
+
+### Decrypt AS-REP
+
+```python
+from impacket.krb5.crypto import decrypt, string_to_key, InvalidChecksum
+from impacket.krb5.asn1 import AS_REP, EncASRepPart
+from pyasn1.codec.der import decoder
+
+def decrypt_as_rep(as_rep_bytes, password, salt, enctype):
+    """
+    Decrypt AS-REP and extract session key.
+    
+    Args:
+        as_rep_bytes: Encoded AS-REP message
+        password: User password
+        salt: Kerberos salt
+        enctype: Encryption type from AS-REP
+    
+    Returns:
+        Tuple of (session_key, enc_as_rep_part)
+    """
+    # Decode AS-REP
+    as_rep = decoder.decode(as_rep_bytes, asn1Spec=AS_REP())[0]
+    
+    # Derive key from password
+    key = string_to_key(enctype, password, salt)
+    
+    # Extract and decrypt enc-part
+    ciphertext = as_rep['enc-part']['cipher']
+    
+    try:
+        plaintext = decrypt(key, 3, ciphertext)  # Key usage 3
+    except InvalidChecksum:
+        raise ValueError("Decryption failed - wrong password?")
+    
+    # Decode encrypted part
+    enc_as_rep_part = decoder.decode(
+        plaintext,
+        asn1Spec=EncASRepPart()
+    )[0]
+    
+    # Extract session key
+    session_key_type = int(enc_as_rep_part['key']['keytype'])
+    session_key_value = enc_as_rep_part['key']['keyvalue'].asOctets()
+    
+    from impacket.krb5.crypto import Key
+    session_key = Key(session_key_type, session_key_value)
+    
+    return session_key, enc_as_rep_part
+
+# Usage
+session_key, enc_part = decrypt_as_rep(
+    as_rep_bytes,
+    'password',
+    'DOMAIN.LOCALuser',
+    18  # AES256
+)
+
+print(f"Session key: {session_key.contents.hex()}")
+print(f"Ticket expires: {enc_part['endtime']}")
+```
+
+### Compute Authenticator Checksum
+
+```python
+from impacket.krb5.crypto import make_checksum, Cksumtype
+from impacket.krb5.gssapi import CheckSumField
+
+def create_authenticator_checksum(session_key, channel_binding=None):
+    """
+    Create checksum for AP-REQ authenticator.
+    """
+    # Build checksum field
+    chk_field = CheckSumField()
+    chk_field['Lgth'] = 16
+    chk_field['Flags'] = 0x00004010  # GSS_C_MUTUAL_FLAG | GSS_C_INTEG_FLAG
+    
+    if channel_binding:
+        chk_field['Bnd'] = channel_binding
+    
+    data = chk_field.getData()
+    
+    # Compute checksum
+    # Determine checksum type from key
+    if session_key.enctype == 18:  # AES256
+        cksumtype = Cksumtype.SHA1_AES256
+    elif session_key.enctype == 17:  # AES128
+        cksumtype = Cksumtype.SHA1_AES128
+    elif session_key.enctype == 23:  # RC4
+        cksumtype = Cksumtype.HMAC_MD5
+    else:
+        raise ValueError(f"Unsupported enctype: {session_key.enctype}")
+    
+    checksum = make_checksum(
+        cksumtype,
+        session_key,
+        11,  # Key usage: AP-REQ authenticator
+        data
+    )
+    
+    return checksum
+```
+
+### Generate Keys from Hash
+
+```python
+from impacket.krb5.crypto import Key, Enctype, generate_kerberos_keys
+from binascii import unhexlify
+
+def keys_from_credentials(username, domain, password=None, nthash=None, aeskey=None):
+    """
+    Generate Kerberos keys from credentials.
+    
+    Returns:
+        Dict of enctype -> Key object
+    """
+    keys = {}
+    
+    # RC4 key from NT hash
+    if nthash:
+        if isinstance(nthash, str):
+            nthash = unhexlify(nthash)
+        keys[Enctype.RC4] = Key(Enctype.RC4, nthash)
+    
+    # AES key directly
+    if aeskey:
+        if isinstance(aeskey, str):
+            aeskey = unhexlify(aeskey)
+        if len(aeskey) == 32:
+            keys[Enctype.AES256] = Key(Enctype.AES256, aeskey)
+        elif len(aeskey) == 16:
+            keys[Enctype.AES128] = Key(Enctype.AES128, aeskey)
+    
+    # Derive from password
+    if password:
+        from impacket.krb5.crypto import string_to_key
+        
+        # Construct salt
+        if username.endswith('$'):
+            # Computer account
+            salt = f"{domain.upper()}host{username[:-1].lower()}.{domain.lower()}"
+        else:
+            # User account
+            salt = f"{domain.upper()}{username}"
+        
+        # Generate AES keys
+        keys[Enctype.AES256] = string_to_key(Enctype.AES256, password, salt)
+        keys[Enctype.AES128] = string_to_key(Enctype.AES128, password, salt)
+        
+        # RC4 from password
+        keys[Enctype.RC4] = string_to_key(Enctype.RC4, password, '')
+    
+    return keys
+
+# Usage
+keys = keys_from_credentials(
+    username='john',
+    domain='DOMAIN.LOCAL',
+    password='P@ssw0rd'
+)
+
+for enctype, key in keys.items():
+    print(f"Enctype {enctype}: {key.contents.hex()}")
+```
+
+## Security Considerations
+
+### Weak Encryption Types
+
+Avoid deprecated algorithms:
+
+```python
+# DO NOT USE
+WEAK_ENCTYPES = [
+    Enctype.DES_CRC,
+    Enctype.DES_MD4,
+    Enctype.DES_MD5
+]
+
+# PREFERRED
+STRONG_ENCTYPES = [
+    Enctype.AES256,  # Best
+    Enctype.AES128,  # Good
+]
+
+# ACCEPTABLE (but RC4 is deprecated)
+ACCEPTABLE_ENCTYPES = [
+    Enctype.RC4,     # Only if AES unavailable
+    Enctype.DES3     # Legacy compatibility
+]
+```
+
+### Key Storage
+
+Protect cryptographic keys:
+
+```python
+import os
+from binascii import hexlify
+
+# Securely wipe key material
+def secure_delete(key_obj):
+    # Overwrite with zeros
+    key_length = len(key_obj.contents)
+    key_obj.contents = b'\x00' * key_length
+
+# Use environment variables for sensitive data
+aeskey_hex = os.environ.get('KERBEROS_AES_KEY')
+if aeskey_hex:
+    aeskey = unhexlify(aeskey_hex)
+    key = Key(Enctype.AES256, aeskey)
+```
+
+### Random Number Generation
+
+Use cryptographically secure RNG:
+
+```python
+from impacket.krb5.crypto import get_random_bytes
+
+# Generate secure random bytes
+confounder = get_random_bytes(16)
+nonce = int.from_bytes(get_random_bytes(4), 'big')
+```
+
+## Error Handling
+
+### InvalidChecksum Exception
+
+```python
+from impacket.krb5.crypto import InvalidChecksum
+
+try:
+    plaintext = decrypt(key, keyusage, ciphertext)
+except InvalidChecksum as e:
+    # Possible causes:
+    # - Wrong key
+    # - Wrong key usage
+    # - Corrupted ciphertext
+    # - Wrong encryption type
+    print(f"Decryption failed: {e}")
+```
+
+### ValueError Exceptions
+
+```python
+try:
+    key = Key(Enctype.AES256, key_bytes)
+except ValueError as e:
+    # Wrong key length
+    print(f"Invalid key: {e}")
+
+try:
+    key = string_to_key(999, password, salt)
+except ValueError as e:
+    # Invalid enctype
+    print(f"Unsupported encryption type: {e}")
+```
+
+## Performance Considerations
+
+### Cipher Selection
+
+**Relative Performance** (fastest to slowest):
+1. RC4 - Very fast but deprecated
+2. AES128 - Fast and secure
+3. AES256 - Secure, slightly slower
+4. DES3 - Slow, avoid
+
+### Key Derivation
+
+```python
+# PBKDF2 iterations affect performance
+import time
+import struct
+
+# Test different iteration counts
+for iterations in [1000, 4096, 10000]:
+    params = struct.pack('>L', iterations)
+    
+    start = time.time()
+    key = string_to_key(Enctype.AES256, 'password', 'salt', params)
+    elapsed = time.time() - start
+    
+    print(f"{iterations} iterations: {elapsed:.3f}s")
+
+# Output:
+# 1000 iterations: 0.012s
+# 4096 iterations: 0.048s (default)
+# 10000 iterations: 0.118s
+```
+
+### Caching Keys
+
+Cache derived keys to avoid repeated computation:
+
+```python
+class KeyCache:
+    def __init__(self):
+        self._cache = {}
+    
+    def get_key(self, enctype, password, salt):
+        cache_key = (enctype, password, salt)
+        
+        if cache_key not in self._cache:
+            self._cache[cache_key] = string_to_key(enctype, password, salt)
+        
+        return self._cache[cache_key]
+
+cache = KeyCache()
+key = cache.get_key(Enctype.AES256, 'password', 'DOMAIN.LOCALuser')
+```
+
+## See Also
+
+- [Kerberos Overview](/api/krb5/overview)
+- [ASN.1 Structures](/api/krb5/asn1)
+- [Protocol Functions](/api/krb5/kerberosv5)
+- [RFC 3961 - Kerberos Cryptography](https://www.rfc-editor.org/rfc/rfc3961.html)
+- [RFC 3962 - AES for Kerberos](https://www.rfc-editor.org/rfc/rfc3962.html)
+- [RFC 4757 - RC4-HMAC for Kerberos](https://www.rfc-editor.org/rfc/rfc4757.html)

@@ -1,0 +1,730 @@
+---
+title: 'SMBConnection'
+description: 'High-level SMB client wrapper supporting SMB1, SMB2, and SMB3'
+---
+
+## Overview
+
+The `SMBConnection` class provides a unified, high-level interface for SMB communication that automatically handles protocol negotiation between SMB1, SMB2, and SMB3. It abstracts away protocol-specific details and provides a consistent API regardless of the underlying SMB version.
+
+## Class Definition
+
+### SMBConnection
+
+Main class for SMB client operations with automatic protocol negotiation.
+
+```python
+from impacket.smbconnection import SMBConnection
+
+conn = SMBConnection(remoteName, remoteHost, myName=None, 
+                      sess_port=445, timeout=60, 
+                      preferredDialect=None)
+```
+
+<ParamField path="remoteName" type="str" required>
+  NetBIOS name of the remote host. Use `'*SMBSERVER'` for automatic detection, or provide the actual hostname.
+</ParamField>
+
+<ParamField path="remoteHost" type="str" required>
+  IP address or hostname of the target server
+</ParamField>
+
+<ParamField path="myName" type="str">
+  Local NetBIOS name. If `None`, uses the local hostname.
+</ParamField>
+
+<ParamField path="sess_port" type="int" default="445">
+  SMB session port. Use `445` for direct TCP or `139` for NetBIOS
+</ParamField>
+
+<ParamField path="timeout" type="int" default="60">
+  Connection timeout in seconds
+</ParamField>
+
+<ParamField path="preferredDialect" type="str | int">
+  Preferred SMB dialect. Options:
+  - `SMB_DIALECT` - SMB1 (NT LM 0.12)
+  - `SMB2_DIALECT_002` - SMB 2.0.2
+  - `SMB2_DIALECT_21` - SMB 2.1
+  - `SMB2_DIALECT_30` - SMB 3.0
+  - `SMB2_DIALECT_311` - SMB 3.1.1
+  
+  If `None`, negotiates the highest supported version.
+</ParamField>
+
+## Authentication Methods
+
+### login()
+
+Authenticate using NTLM.
+
+```python
+conn.login(user, password, domain='', lmhash='', nthash='', 
+           ntlmFallback=True)
+```
+
+<ParamField path="user" type="str" required>
+  Username for authentication
+</ParamField>
+
+<ParamField path="password" type="str" required>
+  User password (not used if hashes are provided)
+</ParamField>
+
+<ParamField path="domain" type="str" default="''">
+  Domain name for the account
+</ParamField>
+
+<ParamField path="lmhash" type="str" default="''">
+  LM hash for pass-the-hash authentication (hex string)
+</ParamField>
+
+<ParamField path="nthash" type="str" default="''">
+  NT hash for pass-the-hash authentication (hex string)
+</ParamField>
+
+<ParamField path="ntlmFallback" type="bool" default="True">
+  Allow fallback to NTLMv1 if NTLMv2 fails (SMB1 only)
+</ParamField>
+
+<ResponseField name="raises" type="SessionError">
+  Raised if authentication fails
+</ResponseField>
+
+### kerberosLogin()
+
+Authenticate using Kerberos.
+
+```python
+conn.kerberosLogin(user, password, domain='', lmhash='', nthash='',
+                   aesKey='', kdcHost=None, TGT=None, TGS=None,
+                   useCache=True)
+```
+
+<ParamField path="user" type="str" required>
+  Username for authentication
+</ParamField>
+
+<ParamField path="password" type="str" required>
+  User password
+</ParamField>
+
+<ParamField path="domain" type="str" required>
+  Domain name (required for Kerberos)
+</ParamField>
+
+<ParamField path="lmhash" type="str" default="''">
+  LM hash for RC4-HMAC if AES not supported
+</ParamField>
+
+<ParamField path="nthash" type="str" default="''">
+  NT hash for RC4-HMAC if AES not supported
+</ParamField>
+
+<ParamField path="aesKey" type="str" default="''">
+  AES key (aes256-cts-hmac-sha1-96 or aes128-cts-hmac-sha1-96)
+</ParamField>
+
+<ParamField path="kdcHost" type="str">
+  Hostname or IP of the KDC. If `None`, uses DNS to resolve the domain.
+</ParamField>
+
+<ParamField path="TGT" type="dict">
+  Pre-obtained Ticket Granting Ticket
+</ParamField>
+
+<ParamField path="TGS" type="dict">
+  Pre-obtained Ticket Granting Service ticket
+</ParamField>
+
+<ParamField path="useCache" type="bool" default="True">
+  Use credential cache for ticket lookup
+</ParamField>
+
+## File and Directory Operations
+
+### connectTree()
+
+Connect to a network share.
+
+```python
+tid = conn.connectTree(share)
+```
+
+<ParamField path="share" type="str" required>
+  Share name (e.g., `'ADMIN$'`, `'C$'`, `'IPC$'`)
+</ParamField>
+
+<ResponseField name="return" type="int">
+  Tree ID for use in subsequent operations
+</ResponseField>
+
+### listPath()
+
+List files and directories in a share.
+
+```python
+files = conn.listPath(shareName, path, password=None)
+```
+
+<ParamField path="shareName" type="str" required>
+  Name of the share to list
+</ParamField>
+
+<ParamField path="path" type="str" required>
+  Path pattern (e.g., `'*'` for all files, `'*.txt'` for text files)
+</ParamField>
+
+<ParamField path="password" type="str">
+  Password for password-protected shares
+</ParamField>
+
+<ResponseField name="return" type="list[SharedFile]">
+  List of `SharedFile` objects
+</ResponseField>
+
+### createFile()
+
+Create or open a file.
+
+```python
+fid = conn.createFile(treeId, pathName, desiredAccess=GENERIC_ALL,
+                       shareMode=FILE_SHARE_READ | FILE_SHARE_WRITE,
+                       creationOption=FILE_NON_DIRECTORY_FILE,
+                       creationDisposition=FILE_OVERWRITE_IF,
+                       fileAttributes=FILE_ATTRIBUTE_NORMAL)
+```
+
+<ParamField path="treeId" type="int" required>
+  Tree ID from `connectTree()`
+</ParamField>
+
+<ParamField path="pathName" type="str" required>
+  Path to the file relative to share root
+</ParamField>
+
+<ParamField path="desiredAccess" type="int" default="GENERIC_ALL">
+  Access mask (e.g., `FILE_READ_DATA`, `FILE_WRITE_DATA`, `GENERIC_ALL`)
+</ParamField>
+
+<ParamField path="shareMode" type="int" default="FILE_SHARE_READ | FILE_SHARE_WRITE">
+  Share access mode
+</ParamField>
+
+<ParamField path="creationOption" type="int" default="FILE_NON_DIRECTORY_FILE">
+  File creation options
+</ParamField>
+
+<ParamField path="creationDisposition" type="int" default="FILE_OVERWRITE_IF">
+  Action to take if file exists
+</ParamField>
+
+<ParamField path="fileAttributes" type="int" default="FILE_ATTRIBUTE_NORMAL">
+  File attributes to set
+</ParamField>
+
+<ResponseField name="return" type="int">
+  File ID (FID) for subsequent operations
+</ResponseField>
+
+### openFile()
+
+Open an existing file.
+
+```python
+fid = conn.openFile(treeId, pathName, desiredAccess=FILE_READ_DATA,
+                     shareMode=FILE_SHARE_READ)
+```
+
+<ParamField path="treeId" type="int" required>
+  Tree ID
+</ParamField>
+
+<ParamField path="pathName" type="str" required>
+  Path to the file
+</ParamField>
+
+<ParamField path="desiredAccess" type="int" default="FILE_READ_DATA">
+  Access rights requested
+</ParamField>
+
+<ParamField path="shareMode" type="int" default="FILE_SHARE_READ">
+  Sharing mode
+</ParamField>
+
+<ResponseField name="return" type="int">
+  File ID for the opened file
+</ResponseField>
+
+### readFile()
+
+Read data from a file.
+
+```python
+data = conn.readFile(treeId, fileId, offset=0, bytesToRead=None,
+                      singleCall=True)
+```
+
+<ParamField path="treeId" type="int" required>
+  Tree ID
+</ParamField>
+
+<ParamField path="fileId" type="int" required>
+  File ID from `openFile()` or `createFile()`
+</ParamField>
+
+<ParamField path="offset" type="int" default="0">
+  Byte offset to start reading from
+</ParamField>
+
+<ParamField path="bytesToRead" type="int">
+  Number of bytes to read. If `None`, reads maximum buffer size.
+</ParamField>
+
+<ParamField path="singleCall" type="bool" default="True">
+  If `True`, reads only once. If `False`, continues reading until `bytesToRead` is satisfied.
+</ParamField>
+
+<ResponseField name="return" type="bytes">
+  Data read from the file
+</ResponseField>
+
+### writeFile()
+
+Write data to a file.
+
+```python
+bytes_written = conn.writeFile(treeId, fileId, data, offset=0)
+```
+
+<ParamField path="treeId" type="int" required>
+  Tree ID
+</ParamField>
+
+<ParamField path="fileId" type="int" required>
+  File ID
+</ParamField>
+
+<ParamField path="data" type="bytes" required>
+  Data to write
+</ParamField>
+
+<ParamField path="offset" type="int" default="0">
+  Byte offset to write at
+</ParamField>
+
+<ResponseField name="return" type="int">
+  Number of bytes written
+</ResponseField>
+
+### closeFile()
+
+Close an open file.
+
+```python
+conn.closeFile(treeId, fileId)
+```
+
+<ParamField path="treeId" type="int" required>
+  Tree ID
+</ParamField>
+
+<ParamField path="fileId" type="int" required>
+  File ID to close
+</ParamField>
+
+### deleteFile()
+
+Delete a file from the share.
+
+```python
+conn.deleteFile(shareName, pathName)
+```
+
+<ParamField path="shareName" type="str" required>
+  Share name
+</ParamField>
+
+<ParamField path="pathName" type="str" required>
+  Path to the file to delete
+</ParamField>
+
+### getFile()
+
+Download a file using a callback.
+
+```python
+with open('local_file.txt', 'wb') as f:
+    conn.getFile(shareName, pathName, f.write)
+```
+
+<ParamField path="shareName" type="str" required>
+  Share name
+</ParamField>
+
+<ParamField path="pathName" type="str" required>
+  Remote file path
+</ParamField>
+
+<ParamField path="callback" type="callable" required>
+  Function to call with file data chunks (receives bytes)
+</ParamField>
+
+<ParamField path="shareAccessMode" type="int" default="FILE_SHARE_READ">
+  Share access mode
+</ParamField>
+
+### putFile()
+
+Upload a file using a callback.
+
+```python
+with open('local_file.txt', 'rb') as f:
+    conn.putFile(shareName, pathName, f.read)
+```
+
+<ParamField path="shareName" type="str" required>
+  Share name
+</ParamField>
+
+<ParamField path="pathName" type="str" required>
+  Remote file path
+</ParamField>
+
+<ParamField path="callback" type="callable" required>
+  Function to call to get file data (receives int size, returns bytes)
+</ParamField>
+
+### createDirectory()
+
+Create a directory.
+
+```python
+conn.createDirectory(shareName, pathName)
+```
+
+<ParamField path="shareName" type="str" required>
+  Share name
+</ParamField>
+
+<ParamField path="pathName" type="str" required>
+  Directory path to create
+</ParamField>
+
+### deleteDirectory()
+
+Delete a directory.
+
+```python
+conn.deleteDirectory(shareName, pathName)
+```
+
+<ParamField path="shareName" type="str" required>
+  Share name
+</ParamField>
+
+<ParamField path="pathName" type="str" required>
+  Directory path to delete
+</ParamField>
+
+### rename()
+
+Rename a file or directory.
+
+```python
+conn.rename(shareName, oldPath, newPath)
+```
+
+<ParamField path="shareName" type="str" required>
+  Share name
+</ParamField>
+
+<ParamField path="oldPath" type="str" required>
+  Current path
+</ParamField>
+
+<ParamField path="newPath" type="str" required>
+  New path
+</ParamField>
+
+## Information Retrieval
+
+### listShares()
+
+List available shares on the server.
+
+```python
+shares = conn.listShares()
+```
+
+<ResponseField name="return" type="list[dict]">
+  List of share dictionaries with keys like `'shi1_netname'`, `'shi1_type'`, `'shi1_remark'`
+</ResponseField>
+
+### getDialect()
+
+Get the negotiated SMB dialect.
+
+```python
+dialect = conn.getDialect()
+```
+
+<ResponseField name="return" type="str | int">
+  The negotiated dialect (e.g., `SMB2_DIALECT_311`)
+</ResponseField>
+
+### getServerName()
+
+Get the server's NetBIOS name.
+
+```python
+server_name = conn.getServerName()
+```
+
+<ResponseField name="return" type="str">
+  Server NetBIOS name
+</ResponseField>
+
+### getServerDomain()
+
+Get the server's domain.
+
+```python
+domain = conn.getServerDomain()
+```
+
+<ResponseField name="return" type="str">
+  Server domain name
+</ResponseField>
+
+### getServerOS()
+
+Get the server's operating system.
+
+```python
+os_info = conn.getServerOS()
+```
+
+<ResponseField name="return" type="str">
+  Operating system string (e.g., `"Windows 10 Build 19041"`)
+</ResponseField>
+
+### isGuestSession()
+
+Check if logged in as guest.
+
+```python
+is_guest = conn.isGuestSession()
+```
+
+<ResponseField name="return" type="bool">
+  `True` if guest session, `False` otherwise
+</ResponseField>
+
+## Named Pipe Operations
+
+### waitNamedPipe()
+
+Wait for a named pipe to become available.
+
+```python
+conn.waitNamedPipe(treeId, pipeName, timeout=5)
+```
+
+<ParamField path="treeId" type="int" required>
+  Tree ID (usually for IPC$ share)
+</ParamField>
+
+<ParamField path="pipeName" type="str" required>
+  Name of the pipe (e.g., `'\\PIPE\\srvsvc'`)
+</ParamField>
+
+<ParamField path="timeout" type="int" default="5">
+  Timeout in seconds
+</ParamField>
+
+### transactNamedPipe()
+
+Perform a transaction on a named pipe.
+
+```python
+conn.transactNamedPipe(treeId, fileId, data, waitAnswer=True)
+```
+
+<ParamField path="treeId" type="int" required>
+  Tree ID
+</ParamField>
+
+<ParamField path="fileId" type="int" required>
+  File ID of the opened pipe
+</ParamField>
+
+<ParamField path="data" type="bytes" required>
+  Data to send
+</ParamField>
+
+<ParamField path="waitAnswer" type="bool" default="True">
+  Wait for response
+</ParamField>
+
+## Connection Management
+
+### close()
+
+Close the connection and log off.
+
+```python
+conn.close()
+```
+
+### logoff()
+
+Log off from the server.
+
+```python
+conn.logoff()
+```
+
+### reconnect()
+
+Reconnect using the same credentials.
+
+```python
+conn.reconnect()
+```
+
+## Usage Examples
+
+### Basic Connection and File Operations
+
+```python
+from impacket.smbconnection import SMBConnection
+
+# Connect to server (automatically negotiates SMB version)
+conn = SMBConnection('WORKSTATION', '192.168.1.100')
+
+# Authenticate
+conn.login('admin', 'password', 'DOMAIN')
+
+# List shares
+shares = conn.listShares()
+for share in shares:
+    print(f"Share: {share['shi1_netname']} - {share['shi1_remark']}")
+
+# List files
+files = conn.listPath('C$', '/*')
+for f in files:
+    print(f"{f.get_longname()} ({f.get_filesize()} bytes)")
+
+# Read a file
+tid = conn.connectTree('C$')
+fid = conn.openFile(tid, '/Windows/System32/drivers/etc/hosts',
+                     FILE_READ_DATA, FILE_SHARE_READ)
+data = conn.readFile(tid, fid)
+conn.closeFile(tid, fid)
+
+print(data.decode('utf-8'))
+
+# Clean up
+conn.close()
+```
+
+### Upload and Download Files
+
+```python
+from impacket.smbconnection import SMBConnection
+
+conn = SMBConnection('*SMBSERVER', '192.168.1.100')
+conn.login('user', 'pass')
+
+# Upload a file
+with open('local.txt', 'rb') as f:
+    conn.putFile('share', '/remote.txt', f.read)
+
+# Download a file
+with open('downloaded.txt', 'wb') as f:
+    conn.getFile('share', '/remote.txt', f.write)
+
+conn.close()
+```
+
+### Kerberos Authentication
+
+```python
+from impacket.smbconnection import SMBConnection
+
+conn = SMBConnection('DC01', '192.168.1.10')
+
+# Authenticate with Kerberos
+conn.kerberosLogin('admin', 'password', 'CORP.LOCAL',
+                    kdcHost='dc01.corp.local')
+
+# Perform operations
+shares = conn.listShares()
+for share in shares:
+    print(share['shi1_netname'])
+
+conn.close()
+```
+
+### Pass-the-Hash
+
+```python
+from impacket.smbconnection import SMBConnection
+
+conn = SMBConnection('*SMBSERVER', '192.168.1.100')
+
+# Authenticate using NTLM hash
+conn.login('administrator', '', 'WORKGROUP',
+           lmhash='aad3b435b51404eeaad3b435b51404ee',
+           nthash='8846f7eaee8fb117ad06bdd830b7586c')
+
+tid = conn.connectTree('ADMIN$')
+files = conn.listPath('ADMIN$', '/*')
+conn.close()
+```
+
+### Working with Named Pipes (RPC)
+
+```python
+from impacket.smbconnection import SMBConnection
+from impacket.dcerpc.v5 import transport
+
+conn = SMBConnection('*SMBSERVER', '192.168.1.100')
+conn.login('admin', 'password')
+
+# Use SMBConnection for RPC transport
+rpctransport = transport.SMBTransport('192.168.1.100',
+                                       filename=r'\pipe\samr',
+                                       smb_connection=conn)
+
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+# ... perform RPC operations ...
+
+conn.close()
+```
+
+## Error Handling
+
+```python
+from impacket.smbconnection import SMBConnection, SessionError
+from impacket.nt_errors import STATUS_LOGON_FAILURE, STATUS_OBJECT_NAME_NOT_FOUND
+
+try:
+    conn = SMBConnection('*SMBSERVER', '192.168.1.100')
+    conn.login('user', 'wrongpass')
+except SessionError as e:
+    error_code = e.getErrorCode()
+    
+    if error_code == STATUS_LOGON_FAILURE:
+        print("Invalid credentials")
+    else:
+        print(f"SMB Error: {e.getErrorString()}")
+```
+
+## See Also
+
+- [SMB](/api/smb) - Low-level SMB1 implementation
+- [SMB3](/api/smbconnection) - Low-level SMB2/SMB3 implementation
+- [NTLM](/api/ntlm) - NTLM authentication

@@ -1,0 +1,587 @@
+---
+title: 'NMB'
+description: 'NetBIOS Name Service implementation for name resolution and node status queries'
+---
+
+## Overview
+
+The `nmb` module provides a complete implementation of the NetBIOS Name Service (NBNS) protocol. It enables NetBIOS name resolution, node status queries, and NetBIOS session management over TCP and UDP.
+
+## Key Classes
+
+### NetBIOS
+
+Main class for NetBIOS Name Service operations.
+
+```python
+from impacket import nmb
+
+nb = nmb.NetBIOS()
+response = nb.gethostbyname('WORKSTATION', timeout=1)
+```
+
+<ParamField path="servport" type="int" default="137">
+  NetBIOS Name Service port number
+</ParamField>
+
+### Methods
+
+#### gethostbyname()
+
+Resolve a NetBIOS name to IP address.
+
+```python
+response = nb.gethostbyname(nbname, qtype=TYPE_WORKSTATION, 
+                             scope=None, timeout=1)
+```
+
+<ParamField path="nbname" type="str" required>
+  NetBIOS name to resolve
+</ParamField>
+
+<ParamField path="qtype" type="int" default="TYPE_WORKSTATION">
+  NetBIOS name type:
+  - `TYPE_WORKSTATION` (0x00) - Workstation service
+  - `TYPE_SERVER` (0x20) - File server service
+  - `TYPE_DOMAIN_MASTER` (0x1B) - Domain master browser
+  - `TYPE_DOMAIN_CONTROLLER` (0x1C) - Domain controller
+  - `TYPE_MASTER_BROWSER` (0x1D) - Master browser
+</ParamField>
+
+<ParamField path="scope" type="str">
+  NetBIOS scope identifier (rarely used)
+</ParamField>
+
+<ParamField path="timeout" type="int" default="1">
+  Query timeout in seconds
+</ParamField>
+
+<ResponseField name="return" type="NBPositiveNameQueryResponse">
+  Object containing IP addresses for the name
+</ResponseField>
+
+#### getnodestatus()
+
+Query node status information.
+
+```python
+entries = nb.getnodestatus(nbname, destaddr=None, 
+                            type=TYPE_WORKSTATION,
+                            scope=None, timeout=1)
+```
+
+<ParamField path="nbname" type="str" required>
+  NetBIOS name to query (use `'*'` for any name)
+</ParamField>
+
+<ParamField path="destaddr" type="str">
+  IP address to send query to. If `None`, uses broadcast or nameserver.
+</ParamField>
+
+<ParamField path="type" type="int" default="TYPE_WORKSTATION">
+  NetBIOS name type
+</ParamField>
+
+<ParamField path="scope" type="str">
+  NetBIOS scope
+</ParamField>
+
+<ParamField path="timeout" type="int" default="1">
+  Query timeout in seconds
+</ParamField>
+
+<ResponseField name="return" type="list[NODE_NAME_ENTRY]">
+  List of NetBIOS name entries registered by the node
+</ResponseField>
+
+#### getnetbiosname()
+
+Get the NetBIOS name for an IP address.
+
+```python
+name = nb.getnetbiosname(ip)
+```
+
+<ParamField path="ip" type="str" required>
+  IP address to query
+</ParamField>
+
+<ResponseField name="return" type="str">
+  NetBIOS name of the server type (0x20)
+</ResponseField>
+
+#### getmacaddress()
+
+Get MAC address from last node status query.
+
+```python
+mac = nb.getmacaddress()
+```
+
+<ResponseField name="return" type="str">
+  MAC address in format `'AA-BB-CC-DD-EE-FF'`
+</ResponseField>
+
+#### set_nameserver()
+
+Set a specific NetBIOS nameserver.
+
+```python
+nb.set_nameserver('192.168.1.10')
+```
+
+<ParamField path="nameserver" type="str" required>
+  IP address of NetBIOS nameserver
+</ParamField>
+
+#### set_broadcastaddr()
+
+Set the broadcast address for queries.
+
+```python
+nb.set_broadcastaddr('192.168.1.255')
+```
+
+<ParamField path="broadcastaddr" type="str" required>
+  Broadcast address
+</ParamField>
+
+### NetBIOSTCPSession
+
+TCP-based NetBIOS session for SMB communication.
+
+```python
+session = nmb.NetBIOSTCPSession(myname, remote_name, remote_host,
+                                 remote_type=TYPE_SERVER,
+                                 sess_port=139, timeout=60)
+```
+
+<ParamField path="myname" type="str" required>
+  Local NetBIOS name
+</ParamField>
+
+<ParamField path="remote_name" type="str" required>
+  Remote NetBIOS name
+</ParamField>
+
+<ParamField path="remote_host" type="str" required>
+  Remote IP address
+</ParamField>
+
+<ParamField path="remote_type" type="int" default="TYPE_SERVER">
+  Remote NetBIOS name type
+</ParamField>
+
+<ParamField path="sess_port" type="int" default="139">
+  Session port (139 for NetBIOS, 445 for direct SMB)
+</ParamField>
+
+<ParamField path="timeout" type="int">
+  Connection timeout
+</ParamField>
+
+#### send_packet()
+
+Send a NetBIOS session packet.
+
+```python
+session.send_packet(data)
+```
+
+<ParamField path="data" type="bytes" required>
+  Data to send
+</ParamField>
+
+#### recv_packet()
+
+Receive a NetBIOS session packet.
+
+```python
+packet = session.recv_packet(timeout=None)
+```
+
+<ParamField path="timeout" type="int">
+  Receive timeout in seconds
+</ParamField>
+
+<ResponseField name="return" type="NetBIOSSessionPacket">
+  Received packet
+</ResponseField>
+
+### NetBIOSUDPSession
+
+UDP-based NetBIOS datagram service.
+
+```python
+session = nmb.NetBIOSUDPSession(myname, remote_name, remote_host,
+                                 remote_type=TYPE_SERVER,
+                                 sess_port=138)
+```
+
+## Constants
+
+### Port Numbers
+
+```python
+NETBIOS_NS_PORT = 137         # Name Service
+NETBIOS_SESSION_PORT = 139    # Session Service  
+SMB_SESSION_PORT = 445        # Direct SMB (no NetBIOS)
+```
+
+### Name Types
+
+```python
+TYPE_WORKSTATION = 0x00       # Workstation service
+TYPE_CLIENT = 0x03            # Messenger service
+TYPE_SERVER = 0x20            # File server service
+TYPE_DOMAIN_MASTER = 0x1B     # Domain master browser
+TYPE_DOMAIN_CONTROLLER = 0x1C # Domain controller
+TYPE_MASTER_BROWSER = 0x1D    # Master browser
+TYPE_BROWSER = 0x1E           # Browser service
+TYPE_NETDDE = 0x1F            # NetDDE service
+TYPE_STATUS = 0x21            # Node status
+```
+
+### Node Types
+
+```python
+NODE_B = 0x0000              # Broadcast node
+NODE_P = 0x2000              # Point-to-point node
+NODE_M = 0x4000              # Mixed node
+NODE_GROUP = 0x8000          # Group name
+NODE_UNIQUE = 0x0            # Unique name
+```
+
+## Supporting Classes
+
+### NODE_NAME_ENTRY
+
+Represents a NetBIOS name entry from node status.
+
+<ResponseField name="NAME" type="bytes">
+  NetBIOS name (15 bytes)
+</ResponseField>
+
+<ResponseField name="TYPE" type="int">
+  Name type suffix (0x00, 0x20, etc.)
+</ResponseField>
+
+<ResponseField name="NAME_FLAGS" type="int">
+  Name flags (active, permanent, conflict, etc.)
+</ResponseField>
+
+### NBPositiveNameQueryResponse
+
+Response from name query containing IP addresses.
+
+```python
+response = nb.gethostbyname('WORKSTATION')
+for ip in response.entries:
+    print(f"IP: {ip}")
+```
+
+<ResponseField name="entries" type="list[str]">
+  List of IP addresses
+</ResponseField>
+
+### NetBIOSSessionPacket
+
+Represents a NetBIOS session packet.
+
+<ResponseField name="get_type()" type="int">
+  Packet type (MESSAGE, REQUEST, RESPONSE, etc.)
+</ResponseField>
+
+<ResponseField name="get_trailer()" type="bytes">
+  Packet data payload
+</ResponseField>
+
+<ResponseField name="get_length()" type="int">
+  Payload length
+</ResponseField>
+
+## Exceptions
+
+### NetBIOSError
+
+Raised when NetBIOS operations fail.
+
+```python
+try:
+    response = nb.gethostbyname('UNKNOWN')
+except nmb.NetBIOSError as e:
+    print(f"NetBIOS error: {e}")
+```
+
+### NetBIOSTimeout
+
+Raised when operations timeout.
+
+```python
+try:
+    response = nb.gethostbyname('HOST', timeout=1)
+except nmb.NetBIOSTimeout:
+    print("Query timed out")
+```
+
+## Usage Examples
+
+### Name Resolution
+
+```python
+from impacket import nmb
+
+nb = nmb.NetBIOS()
+
+# Resolve NetBIOS name to IP
+try:
+    response = nb.gethostbyname('WORKSTATION', 
+                                 qtype=nmb.TYPE_SERVER,
+                                 timeout=2)
+    
+    print(f"Found {len(response.entries)} addresses:")
+    for ip in response.entries:
+        print(f"  {ip}")
+        
+except nmb.NetBIOSTimeout:
+    print("Name resolution timed out")
+except nmb.NetBIOSError as e:
+    print(f"Error: {e}")
+```
+
+### Node Status Query
+
+```python
+from impacket import nmb
+
+nb = nmb.NetBIOS()
+
+# Query node for all registered names
+try:
+    entries = nb.getnodestatus('*', '192.168.1.100')
+    
+    print(f"NetBIOS names for 192.168.1.100:")
+    for entry in entries:
+        name = entry['NAME'].decode('latin-1').strip()
+        name_type = entry['TYPE']
+        
+        # Get human-readable type
+        type_str = nmb.NAME_TYPES.get(name_type, 'Unknown')
+        
+        print(f"  {name:<15} <{name_type:02X}> {type_str}")
+    
+    # Get MAC address
+    mac = nb.getmacaddress()
+    print(f"\nMAC Address: {mac}")
+    
+except nmb.NetBIOSError as e:
+    print(f"Error: {e}")
+```
+
+### Get NetBIOS Name from IP
+
+```python
+from impacket import nmb
+
+def get_nbname(ip):
+    """
+    Get NetBIOS name for an IP address
+    """
+    nb = nmb.NetBIOS()
+    try:
+        name = nb.getnetbiosname(ip)
+        return name
+    except:
+        return None
+
+# Usage
+ip = '192.168.1.100'
+name = get_nbname(ip)
+if name:
+    print(f"{ip} -> {name}")
+else:
+    print(f"Could not resolve {ip}")
+```
+
+### Network Scanning
+
+```python
+from impacket import nmb
+import ipaddress
+import concurrent.futures
+
+def scan_host(ip):
+    """
+    Scan a single host for NetBIOS
+    """
+    nb = nmb.NetBIOS()
+    try:
+        entries = nb.getnodestatus('*', ip, timeout=1)
+        
+        # Get server name (type 0x20)
+        server_names = [e for e in entries if e['TYPE'] == nmb.TYPE_SERVER]
+        if server_names:
+            name = server_names[0]['NAME'].decode('latin-1').strip()
+            return (ip, name, nb.getmacaddress())
+    except:
+        pass
+    return None
+
+# Scan subnet
+network = ipaddress.ip_network('192.168.1.0/24')
+hosts = [str(ip) for ip in network.hosts()]
+
+print("Scanning for NetBIOS hosts...")
+
+with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+    results = executor.map(scan_host, hosts)
+    
+    for result in results:
+        if result:
+            ip, name, mac = result
+            print(f"{ip:<15} {name:<15} {mac}")
+```
+
+### Using with SMB
+
+```python
+from impacket import nmb, smb
+
+# First resolve NetBIOS name
+nb = nmb.NetBIOS()
+response = nb.gethostbyname('FILESERVER')
+ip = response.entries[0]
+
+print(f"FILESERVER is at {ip}")
+
+# Now connect via SMB
+conn = smb.SMB('FILESERVER', ip)
+conn.login('user', 'password')
+
+# List shares
+tid = conn.connect_tree(f'\\\\{ip}\\IPC$')
+print("Connected successfully")
+conn.logoff()
+```
+
+### Enumerating Domain Controllers
+
+```python
+from impacket import nmb
+
+def find_domain_controllers(domain):
+    """
+    Find domain controllers for a domain
+    """
+    nb = nmb.NetBIOS()
+    
+    # Query for domain controller name (type 0x1C)
+    try:
+        response = nb.gethostbyname(domain, 
+                                     qtype=nmb.TYPE_DOMAIN_CONTROLLER)
+        return response.entries
+    except nmb.NetBIOSError:
+        return []
+
+# Usage
+domain = 'CORP'
+dcs = find_domain_controllers(domain)
+
+if dcs:
+    print(f"Domain controllers for {domain}:")
+    for dc_ip in dcs:
+        # Get DC name
+        nb = nmb.NetBIOS()
+        try:
+            dc_name = nb.getnetbiosname(dc_ip)
+            print(f"  {dc_name} ({dc_ip})")
+        except:
+            print(f"  {dc_ip}")
+else:
+    print(f"No domain controllers found for {domain}")
+```
+
+### Custom NetBIOS Session
+
+```python
+from impacket import nmb
+
+# Create NetBIOS session
+session = nmb.NetBIOSTCPSession(
+    myname='CLIENT',
+    remote_name='SERVER',
+    remote_host='192.168.1.100',
+    remote_type=nmb.TYPE_SERVER,
+    sess_port=139
+)
+
+# Send data
+data = b'SMB data here'
+session.send_packet(data)
+
+# Receive response
+response = session.recv_packet(timeout=5)
+print(f"Received {len(response.get_trailer())} bytes")
+
+# Close session
+session.close()
+```
+
+## Helper Functions
+
+### encode_name()
+
+Encode a NetBIOS name.
+
+```python
+from impacket.nmb import encode_name
+
+encoded = encode_name('WORKSTATION', nmb.TYPE_SERVER, scope=None)
+```
+
+<ParamField path="name" type="str" required>
+  NetBIOS name (max 15 characters)
+</ParamField>
+
+<ParamField path="nametype" type="int" required>
+  Name type suffix
+</ParamField>
+
+<ParamField path="scope" type="str">
+  NetBIOS scope
+</ParamField>
+
+<ResponseField name="return" type="bytes">
+  Encoded NetBIOS name
+</ResponseField>
+
+### decode_name()
+
+Decode an encoded NetBIOS name.
+
+```python
+from impacket.nmb import decode_name
+
+offset, name, scope = decode_name(encoded_data)
+```
+
+<ParamField path="name" type="bytes" required>
+  Encoded name data
+</ParamField>
+
+<ResponseField name="offset" type="int">
+  Bytes consumed
+</ResponseField>
+
+<ResponseField name="name" type="str">
+  Decoded name
+</ResponseField>
+
+<ResponseField name="scope" type="str">
+  Scope identifier
+</ResponseField>
+
+## See Also
+
+- [SMB](/api/smb) - SMB protocol implementation
+- [SMBConnection](/api/smbconnection) - High-level SMB client

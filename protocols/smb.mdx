@@ -1,0 +1,467 @@
+---
+title: 'SMB Protocol'
+description: 'Complete guide to Impacket SMB/SMB2/SMB3 protocol implementation'
+---
+
+# SMB Protocol
+
+Impacket provides comprehensive support for the Server Message Block (SMB) protocol family, including SMB1 (CIFS), SMB2, and SMB3 with advanced features like signing and encryption.
+
+## Overview
+
+The SMB implementation in Impacket consists of three main modules:
+
+- **`smb.py`** - SMB1 (CIFS) protocol implementation
+- **`smb3.py`** - SMB2 and SMB3 protocol implementation  
+- **`smbconnection.py`** - High-level unified interface for all SMB versions
+
+<Card title="Protocol Versions" icon="layer-group">
+  SMB1 uses the 'NT LM 0.12' dialect, while SMB2/3 support multiple dialects including 2.002, 2.1, 3.0, and 3.11 with progressively enhanced security and performance features.
+</Card>
+
+## SMBConnection Class
+
+The `SMBConnection` class provides a unified, version-agnostic interface for SMB operations.
+
+### Basic Connection
+
+```python
+from impacket.smbconnection import SMBConnection
+
+# Connect to target
+conn = SMBConnection(
+    remoteName='DC01',
+    remoteHost='192.168.1.10',
+    sess_port=445,
+    timeout=60
+)
+
+# Authenticate
+conn.login('username', 'password', 'DOMAIN')
+
+# Get negotiated dialect
+print(f"Dialect: {conn.getDialect()}")
+```
+
+### Authentication Methods
+
+<Tabs>
+  <Tab title="NTLM">
+    ```python
+    # Password authentication
+    conn.login('admin', 'P@ssw0rd', 'CORP')
+    
+    # Hash authentication (Pass-the-Hash)
+    conn.login(
+        user='admin',
+        password='',
+        domain='CORP',
+        lmhash='aad3b435b51404eeaad3b435b51404ee',
+        nthash='31d6cfe0d16ae931b73c59d7e0c089c0'
+    )
+    ```
+  </Tab>
+  <Tab title="Kerberos">
+    ```python
+    # Kerberos authentication
+    conn.kerberosLogin(
+        user='admin',
+        password='P@ssw0rd',
+        domain='CORP.LOCAL',
+        kdcHost='dc01.corp.local'
+    )
+    
+    # With AES key
+    conn.kerberosLogin(
+        user='admin',
+        password='',
+        domain='CORP.LOCAL',
+        aesKey='e5c4...', # AES256 or AES128 key
+        kdcHost='dc01.corp.local'
+    )
+    ```
+  </Tab>
+</Tabs>
+
+## File Operations
+
+### Reading Files
+
+```python
+# List shares
+shares = conn.listShares()
+for share in shares:
+    print(f"{share['shi1_netname']}: {share['shi1_remark']}")
+
+# List directory contents  
+files = conn.listPath('C$', '\\Windows\\System32\\')
+for f in files:
+    print(f"{f.get_longname()} - {f.get_filesize()} bytes")
+
+# Read file
+tid = conn.connectTree('C$')
+fid = conn.openFile(tid, '\\Windows\\win.ini')
+data = conn.readFile(tid, fid, 0, 1024)
+conn.closeFile(tid, fid)
+print(data.decode('utf-8'))
+```
+
+### Writing Files
+
+```python
+# Upload file
+tid = conn.connectTree('C$')
+fid = conn.createFile(tid, '\\Temp\\test.txt')
+conn.writeFile(tid, fid, b'Hello from Impacket!')
+conn.closeFile(tid, fid)
+
+# Download file
+with open('local_output.txt', 'wb') as f:
+    conn.getFile('C$', '\\Windows\\win.ini', f.write)
+
+# Upload file
+with open('local_input.txt', 'rb') as f:
+    conn.putFile('C$', '\\Temp\\uploaded.txt', f.read)
+```
+
+### Delete and Rename
+
+```python
+# Delete file
+conn.deleteFile('C$', '\\Temp\\test.txt')
+
+# Rename/move file  
+conn.rename('C$', '\\Temp\\old.txt', '\\Temp\\new.txt')
+
+# Create directory
+conn.createDirectory('C$', '\\Temp\\NewFolder')
+
+# Delete directory
+conn.deleteDirectory('C$', '\\Temp\\OldFolder')
+```
+
+## Access Masks and File Attributes
+
+### Common Access Masks
+
+Access masks control file permissions. These constants are defined in `smb.py:284-300`:
+
+```python
+from impacket.smb import (
+    FILE_READ_DATA,      # 0x00000001 - Read file data
+    FILE_WRITE_DATA,     # 0x00000002 - Write file data  
+    FILE_APPEND_DATA,    # 0x00000004 - Append to file
+    FILE_READ_EA,        # 0x00000008 - Read extended attributes
+    FILE_WRITE_EA,       # 0x00000010 - Write extended attributes
+    FILE_EXECUTE,        # 0x00000020 - Execute file
+    DELETE,              # 0x00010000 - Delete or rename
+    READ_CONTROL,        # 0x00020000 - Read security descriptor
+    GENERIC_READ,        # Standard read access
+    GENERIC_WRITE,       # Standard write access
+    GENERIC_ALL          # 0x10000000 - Full access
+)
+
+# Open with specific access
+fid = conn.openFile(
+    tid, 
+    '\\file.txt',
+    desiredAccess=FILE_READ_DATA | FILE_READ_ATTRIBUTES
+)
+```
+
+### File Attributes
+
+```python
+from impacket.smb import (
+    ATTR_READONLY,    # 0x001
+    ATTR_HIDDEN,      # 0x002  
+    ATTR_SYSTEM,      # 0x004
+    ATTR_DIRECTORY,   # 0x010
+    ATTR_ARCHIVE,     # 0x020
+    ATTR_NORMAL       # 0x080
+)
+```
+
+## SMB Signing and Encryption
+
+### SMB Signing
+
+<Note>
+  SMB signing ensures message integrity and authenticity. It's automatically negotiated during connection establishment.
+</Note>
+
+```python
+# Check if signing is required
+if conn.isSigningRequired():
+    print("SMB signing is required by server")
+
+# The SMB3 class tracks signing internally (smb3.py:194)
+self.RequireMessageSigning = False  # Server policy
+self._Session['SigningRequired'] = False  # Session state
+self._Session['SigningActivated'] = False  # Active signing
+```
+
+### SMB3 Encryption  
+
+```python
+# SMB3 encryption is negotiated automatically
+# Check encryption support (from smb3.py:228)
+if conn.getSMBServer()._Connection['SupportsEncryption']:
+    print("Server supports SMB3 encryption")
+
+# Encryption uses AES-CCM or AES-GCM
+self.EncryptionAlgorithmList = ['AES-CCM']  # From smb3.py:199
+```
+
+## Protocol Dialects
+
+### Supported Dialects
+
+```python
+from impacket.smb import SMB_DIALECT  # 'NT LM 0.12'
+from impacket.smb3structs import (
+    SMB2_DIALECT_002,   # 0x0202 - SMB 2.0.2
+    SMB2_DIALECT_21,    # 0x0210 - SMB 2.1
+    SMB2_DIALECT_30,    # 0x0300 - SMB 3.0  
+    SMB2_DIALECT_311    # 0x0311 - SMB 3.1.1
+)
+
+# Force specific dialect
+conn = SMBConnection(
+    'target', 
+    '192.168.1.10',
+    preferredDialect=SMB2_DIALECT_30
+)
+```
+
+### Dialect Negotiation
+
+From `smbconnection.py:95-163`, Impacket negotiates the highest supported dialect:
+
+```python
+# Automatic negotiation (default)
+conn.negotiateSession()  
+
+# Manual negotiation with custom flags
+from impacket import smb
+
+conn.negotiateSession(
+    preferredDialect=SMB2_DIALECT_311,
+    flags1=smb.SMB.FLAGS1_PATHCASELESS,
+    flags2=smb.SMB.FLAGS2_EXTENDED_SECURITY | smb.SMB.FLAGS2_NT_STATUS
+)
+```
+
+## Share Types and Permissions
+
+### Share Types
+
+```python
+# Share types from smb.py:79-84
+SHARED_DISK = 0x00                    # Disk share
+SHARED_PRINT_QUEUE = 0x01             # Printer
+SHARED_DEVICE = 0x02                  # Serial device  
+SHARED_IPC = 0x03                     # IPC$ pipe
+SHARED_DISK_HIDDEN = 0x80000000       # Hidden share
+```
+
+### Enumerate Shares
+
+```python
+shares = conn.listShares()
+for share in shares:
+    share_type = share['shi1_type']
+    if share_type == 0:
+        print(f"Disk: {share['shi1_netname']}")
+    elif share_type == 1:
+        print(f"Printer: {share['shi1_netname']}")
+    elif share_type == 3:
+        print(f"IPC: {share['shi1_netname']}")
+```
+
+## Advanced Features
+
+### Tree Connect Management
+
+```python
+# Manual tree connection
+tid = conn.connectTree('IPC$')
+print(f"Tree ID: {tid}")
+
+# Disconnect tree
+conn.disconnectTree(tid)
+```
+
+### Named Pipes (IPC$)
+
+```python
+# Connect to IPC$ for RPC
+tid = conn.connectTree('IPC$')
+fid = conn.openFile(tid, '\\pipe\\svcctl')
+
+# Read/write pipe data
+conn.writeFile(tid, fid, rpc_request)
+response = conn.readFile(tid, fid, 0, 4096)
+
+conn.closeFile(tid, fid)
+```
+
+### Session Information
+
+```python
+# Get server information
+print(f"Server Name: {conn.getServerName()}")
+print(f"Server Domain: {conn.getServerDomain()}")
+print(f"Server OS: {conn.getServerOS()}")
+print(f"Server DNS: {conn.getServerDNSHostName()}")
+
+# Get client information  
+print(f"Client Name: {conn.getClientName()}")
+
+# Check capabilities
+if conn.doesSupportNTLMv2():
+    print("Server supports NTLMv2")
+```
+
+## Error Handling
+
+<Warning>
+  Always handle SMB exceptions to gracefully manage connection issues, authentication failures, and access denied errors.
+</Warning>
+
+```python
+from impacket.smbconnection import SessionError
+from impacket import nt_errors
+
+try:
+    conn = SMBConnection('target', '192.168.1.10')
+    conn.login('user', 'pass', 'DOMAIN')
+    
+except SessionError as e:
+    error_code = e.getErrorCode()
+    
+    if error_code == nt_errors.STATUS_LOGON_FAILURE:
+        print("Invalid credentials")
+    elif error_code == nt_errors.STATUS_ACCOUNT_LOCKED_OUT:
+        print("Account locked")
+    elif error_code == nt_errors.STATUS_ACCESS_DENIED:
+        print("Access denied")
+    else:
+        print(f"Error: {e}")
+        
+finally:
+    if conn:
+        conn.close()
+```
+
+## Complete Example
+
+```python
+from impacket.smbconnection import SMBConnection
+from impacket import nt_errors
+import sys
+
+def smb_client(target, username, password, domain=''):
+    conn = None
+    try:
+        # Connect
+        print(f"[*] Connecting to {target}...")
+        conn = SMBConnection(target, target, sess_port=445)
+        
+        # Authenticate  
+        print(f"[*] Authenticating as {domain}\\{username}...")
+        conn.login(username, password, domain)
+        
+        # Get server info
+        print(f"[+] Connected to {conn.getServerName()}")
+        print(f"[+] Server OS: {conn.getServerOS()}")
+        print(f"[+] Dialect: {conn.getDialect()}")
+        
+        # List shares
+        print("\n[*] Available shares:")
+        shares = conn.listShares()
+        for share in shares:
+            name = share['shi1_netname'][:-1]  # Remove null terminator
+            remark = share['shi1_remark'][:-1]
+            print(f"  - {name}: {remark}")
+            
+        # List C$ contents
+        print("\n[*] Contents of C$:\\:")
+        try:
+            files = conn.listPath('C$', '\\')
+            for f in files[:10]:  # First 10 files
+                print(f"  {f.get_longname():30} {f.get_filesize():>10} bytes")
+        except Exception as e:
+            print(f"  Error listing C$: {e}")
+            
+    except Exception as e:
+        print(f"[-] Error: {e}")
+        return 1
+        
+    finally:
+        if conn:
+            conn.close()
+            print("\n[*] Connection closed")
+    
+    return 0
+
+if __name__ == '__main__':
+    if len(sys.argv) < 4:
+        print(f"Usage: {sys.argv[0]} <target> <username> <password> [domain]")
+        sys.exit(1)
+        
+    target = sys.argv[1]
+    username = sys.argv[2]
+    password = sys.argv[3]
+    domain = sys.argv[4] if len(sys.argv) > 4 else ''
+    
+    sys.exit(smb_client(target, username, password, domain))
+```
+
+## Performance Tuning
+
+### Buffer Sizes
+
+```python
+# Get I/O capabilities (from smbconnection.py:269)
+capabilities = conn.getIOCapabilities()
+print(f"Max Read Size: {capabilities['MaxReadSize']}")
+print(f"Max Write Size: {capabilities['MaxWriteSize']}")
+
+# These are negotiated during protocol handshake
+# SMB3 typically supports larger buffers than SMB1
+```
+
+### Timeouts
+
+```python
+# Set connection timeout
+conn = SMBConnection(
+    'target',
+    '192.168.1.10', 
+    timeout=30  # 30 seconds
+)
+```
+
+## Security Considerations
+
+<Card title="Best Practices" icon="shield-check">
+  - Always use SMB3 when possible for encryption support
+  - Enable signing for message integrity
+  - Use Kerberos authentication over NTLM when available
+  - Close connections properly to clean up resources
+  - Handle credentials securely (avoid hardcoding)
+</Card>
+
+## Related Modules
+
+- [MS-RPC Protocol](/protocols/msrpc) - RPC over SMB named pipes
+- [Kerberos](/protocols/kerberos) - Kerberos authentication
+- [NetBIOS](/protocols/netbios) - NetBIOS name resolution
+
+## References
+
+- **Source Files**: `impacket/smb.py`, `impacket/smb3.py`, `impacket/smbconnection.py`
+- **[MS-SMB]**: SMB 1.0 Protocol Specification
+- **[MS-SMB2]**: SMB 2.0/3.0 Protocol Specification  
+- **[MS-CIFS]**: Common Internet File System Protocol

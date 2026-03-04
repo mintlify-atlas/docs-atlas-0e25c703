@@ -1,0 +1,388 @@
+---
+title: 'DCOM and WMI'
+description: 'Using DCOM and WMI for remote Windows management with Impacket'
+---
+
+## Overview
+
+DCOM (Distributed Component Object Model) is Microsoft's technology for component-based object-oriented programming over the network. Impacket provides support for DCOM and its most common use case: Windows Management Instrumentation (WMI).
+
+## DCOM Architecture
+
+DCOM extends COM (Component Object Model) to support remote object creation and method invocation. Key concepts:
+
+- **OBJREF**: Object references that identify remote objects
+- **IPID**: Interface Pointer Identifier
+- **OXID**: Object Exporter Identifier
+- **IRemUnknown**: Base interface for remote objects
+
+## DCOM Modules
+
+**Location**: `impacket/dcerpc/v5/dcom/`
+
+- `dcomrt.py` - DCOM runtime and core interfaces
+- `wmi.py` - WMI implementation
+- `oaut.py` - OLE Automation types
+- `vds.py` - Virtual Disk Service
+- `comev.py` - COM Event System
+- `scmp.py` - DCOM System Configuration
+
+## Windows Management Instrumentation (WMI)
+
+### Basic WMI Query
+
+```python
+from impacket.dcerpc.v5.dcomrt import DCOMConnection
+from impacket.dcerpc.v5.dcom import wmi
+from impacket.dcerpc.v5.dtypes import NULL
+
+# Establish DCOM connection
+dcom = DCOMConnection(
+    '192.168.1.100',
+    username='Administrator',
+    password='Password123',
+    domain='DOMAIN'
+)
+
+try:
+    # Get WMI interface
+    iInterface = dcom.CoCreateInstanceEx(wmi.CLSID_WbemLevel1Login, wmi.IID_IWbemLevel1Login)
+    iWbemLevel1Login = wmi.IWbemLevel1Login(iInterface)
+    
+    # Login to WMI namespace
+    iWbemServices = iWbemLevel1Login.NTLMLogin('//./root/cimv2', NULL, NULL)
+    iWbemLevel1Login.RemRelease()
+    
+    # Execute WQL query
+    iEnumWbemClassObject = iWbemServices.ExecQuery('SELECT * FROM Win32_Process')
+    
+    # Iterate through results
+    while True:
+        try:
+            pEnum = iEnumWbemClassObject.Next(0xffffffff, 1)[0]
+            record = pEnum.getProperties()
+            
+            print(f"Process: {record['Name']['value']}")
+            print(f"  PID: {record['ProcessId']['value']}")
+            print(f"  Command: {record['CommandLine']['value']}")
+            print()
+            
+        except Exception as e:
+            if 'S_FALSE' in str(e):
+                break
+            raise
+    
+finally:
+    dcom.disconnect()
+```
+
+### Common WMI Queries
+
+```python
+# Operating system information
+iEnum = iWbemServices.ExecQuery('SELECT * FROM Win32_OperatingSystem')
+pEnum = iEnum.Next(0xffffffff, 1)[0]
+record = pEnum.getProperties()
+print(f"OS: {record['Caption']['value']}")
+print(f"Version: {record['Version']['value']}")
+print(f"Architecture: {record['OSArchitecture']['value']}")
+
+# Computer system
+iEnum = iWbemServices.ExecQuery('SELECT * FROM Win32_ComputerSystem')
+pEnum = iEnum.Next(0xffffffff, 1)[0]
+record = pEnum.getProperties()
+print(f"Computer: {record['Name']['value']}")
+print(f"Domain: {record['Domain']['value']}")
+print(f"Model: {record['Model']['value']}")
+
+# Network adapters
+iEnum = iWbemServices.ExecQuery(
+    'SELECT * FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled = True'
+)
+while True:
+    try:
+        pEnum = iEnum.Next(0xffffffff, 1)[0]
+        record = pEnum.getProperties()
+        print(f"Adapter: {record['Description']['value']}")
+        if record['IPAddress']['value']:
+            for ip in record['IPAddress']['value']:
+                print(f"  IP: {ip}")
+    except:
+        break
+
+# Services
+iEnum = iWbemServices.ExecQuery('SELECT * FROM Win32_Service')
+while True:
+    try:
+        pEnum = iEnum.Next(0xffffffff, 1)[0]
+        record = pEnum.getProperties()
+        print(f"{record['Name']['value']}: {record['State']['value']}")
+    except:
+        break
+
+# Installed software
+iEnum = iWbemServices.ExecQuery('SELECT * FROM Win32_Product')
+while True:
+    try:
+        pEnum = iEnum.Next(0xffffffff, 1)[0]
+        record = pEnum.getProperties()
+        print(f"{record['Name']['value']} - {record['Version']['value']}")
+    except:
+        break
+```
+
+### Remote Command Execution via WMI
+
+```python
+from impacket.dcerpc.v5.dcomrt import DCOMConnection
+from impacket.dcerpc.v5.dcom import wmi
+from impacket.dcerpc.v5.dtypes import NULL
+import time
+
+dcom = DCOMConnection('192.168.1.100', 'user', 'pass', 'DOMAIN')
+
+try:
+    iInterface = dcom.CoCreateInstanceEx(wmi.CLSID_WbemLevel1Login, wmi.IID_IWbemLevel1Login)
+    iWbemLevel1Login = wmi.IWbemLevel1Login(iInterface)
+    iWbemServices = iWbemLevel1Login.NTLMLogin('//./root/cimv2', NULL, NULL)
+    
+    # Get Win32_Process class
+    processClass, _ = iWbemServices.GetObject('Win32_Process')
+    
+    # Create process using Create method
+    command = 'cmd.exe /c ipconfig > C:\\\\output.txt'
+    processClass.Create(command, NULL, NULL)
+    
+    print(f"Command executed: {command}")
+    
+    # Wait and check if process exists
+    time.sleep(2)
+    iEnum = iWbemServices.ExecQuery(f'SELECT * FROM Win32_Process WHERE Name="cmd.exe"')
+    
+finally:
+    dcom.disconnect()
+```
+
+### Semi-Interactive Shell via WMI
+
+```python
+from impacket.dcerpc.v5.dcomrt import DCOMConnection
+from impacket.dcerpc.v5.dcom import wmi
+from impacket.dcerpc.v5.dtypes import NULL
+import time
+import random
+import string
+
+class WMIShell:
+    def __init__(self, target, username, password, domain=''):
+        self.dcom = DCOMConnection(target, username, password, domain)
+        iInterface = self.dcom.CoCreateInstanceEx(wmi.CLSID_WbemLevel1Login, wmi.IID_IWbemLevel1Login)
+        iWbemLevel1Login = wmi.IWbemLevel1Login(iInterface)
+        self.iWbemServices = iWbemLevel1Login.NTLMLogin('//./root/cimv2', NULL, NULL)
+        self.processClass, _ = self.iWbemServices.GetObject('Win32_Process')
+        
+    def execute(self, command):
+        """Execute command and return output"""
+        # Generate random filename
+        output_file = ''.join(random.choice(string.ascii_letters) for _ in range(8)) + '.txt'
+        output_path = f'C:\\\\Windows\\\\Temp\\\\{output_file}'
+        
+        # Execute command with output redirection
+        cmd = f'cmd.exe /c {command} > {output_path} 2>&1'
+        self.processClass.Create(cmd, NULL, NULL)
+        
+        # Wait for execution
+        time.sleep(2)
+        
+        # Read output using TYPE command
+        read_cmd = f'cmd.exe /c type {output_path}'
+        # Note: Would need SMB connection to actually retrieve the file
+        # This is a simplified example
+        
+        # Clean up
+        del_cmd = f'cmd.exe /c del {output_path}'
+        self.processClass.Create(del_cmd, NULL, NULL)
+        
+    def __del__(self):
+        self.dcom.disconnect()
+
+# Usage
+shell = WMIShell('192.168.1.100', 'admin', 'pass')
+shell.execute('whoami')
+shell.execute('ipconfig')
+```
+
+## Event Subscriptions (Persistence)
+
+```python
+from impacket.dcerpc.v5.dcomrt import DCOMConnection
+from impacket.dcerpc.v5.dcom import wmi
+from impacket.dcerpc.v5.dtypes import NULL
+
+dcom = DCOMConnection('192.168.1.100', 'user', 'pass', 'DOMAIN')
+
+try:
+    iInterface = dcom.CoCreateInstanceEx(wmi.CLSID_WbemLevel1Login, wmi.IID_IWbemLevel1Login)
+    iWbemLevel1Login = wmi.IWbemLevel1Login(iInterface)
+    iWbemServices = iWbemLevel1Login.NTLMLogin('//./root/subscription', NULL, NULL)
+    
+    # Create event filter (trigger)
+    filterClass, _ = iWbemServices.GetObject('__EventFilter')
+    filterInstance = filterClass.SpawnInstance()
+    filterInstance.Name = 'MyEventFilter'
+    filterInstance.EventNamespace = 'root/cimv2'
+    filterInstance.QueryLanguage = 'WQL'
+    filterInstance.Query = 'SELECT * FROM __InstanceCreationEvent WITHIN 5 WHERE TargetInstance ISA "Win32_Process"'
+    
+    iWbemServices.PutInstance(filterInstance.marshalMe())
+    
+    # Create event consumer (action)
+    consumerClass, _ = iWbemServices.GetObject('CommandLineEventConsumer')
+    consumerInstance = consumerClass.SpawnInstance()
+    consumerInstance.Name = 'MyConsumer'
+    consumerInstance.CommandLineTemplate = 'cmd.exe /c calc.exe'
+    
+    iWbemServices.PutInstance(consumerInstance.marshalMe())
+    
+    # Bind filter to consumer
+    bindingClass, _ = iWbemServices.GetObject('__FilterToConsumerBinding')
+    bindingInstance = bindingClass.SpawnInstance()
+    bindingInstance.Filter = filterInstance.getObjectText(0)
+    bindingInstance.Consumer = consumerInstance.getObjectText(0)
+    
+    iWbemServices.PutInstance(bindingInstance.marshalMe())
+    
+    print("WMI event subscription created for persistence")
+    
+finally:
+    dcom.disconnect()
+```
+
+## DCOM Direct Interface Access
+
+### ShellWindows Interface
+
+```python
+from impacket.dcerpc.v5.dcomrt import DCOMConnection
+from impacket.dcerpc.v5.dcom.oaut import IID_IDispatch, IDispatch, DISPPARAMS, DISPATCH_PROPERTYGET, VARIANT, DISPATCH_METHOD
+
+# ShellWindows CLSID
+CLSID_ShellWindows = '{9BA05972-F6A8-11CF-A442-00A0C90A8F39}'
+IID_ShellWindows = '{85CB6900-4D95-11CF-960C-0080C7F4EE85}'
+
+dcom = DCOMConnection('192.168.1.100', 'user', 'pass')
+
+try:
+    # Create ShellWindows instance
+    iInterface = dcom.CoCreateInstanceEx(CLSID_ShellWindows, IID_IDispatch)
+    iDispatch = IDispatch(iInterface)
+    
+    # Get Item method
+    dispParams = DISPPARAMS()
+    dispParams['rgvarg'] = NULL
+    dispParams['cArgs'] = 0
+    
+    # Call methods through IDispatch
+    resp = iDispatch.Invoke(0x60020002, 0, DISPATCH_PROPERTYGET, dispParams)
+    
+finally:
+    dcom.disconnect()
+```
+
+### MMC20.Application
+
+```python
+from impacket.dcerpc.v5.dcomrt import DCOMConnection
+from impacket.dcerpc.v5.dcom.oaut import IID_IDispatch, IDispatch
+
+CLSID_MMC20 = '{49B2791A-B1AE-4C90-9B8E-E860BA07F889}'
+
+dcom = DCOMConnection('192.168.1.100', 'user', 'pass')
+
+try:
+    iInterface = dcom.CoCreateInstanceEx(CLSID_MMC20, IID_IDispatch)
+    iMMC = IDispatch(iInterface)
+    
+    # Execute commands through MMC Document.ActiveView.ExecuteShellCommand
+    # This requires more complex IDispatch calls
+    
+finally:
+    dcom.disconnect()
+```
+
+## Authentication Options
+
+```python
+# Username/password
+dcom = DCOMConnection('192.168.1.100', 'user', 'pass', 'DOMAIN')
+
+# Kerberos
+import os
+os.environ['KRB5CCNAME'] = '/tmp/krb5cc_1000'
+dcom = DCOMConnection(
+    '192.168.1.100',
+    'user',
+    'pass',
+    'DOMAIN',
+    oxidResolver=True,
+    doKerberos=True,
+    kdcHost='dc.domain.local'
+)
+
+# NTLM hash
+dcom = DCOMConnection(
+    '192.168.1.100',
+    'user',
+    '',
+    'DOMAIN',
+    lmhash='',
+    nthash='aad3b435b51404eeaad3b435b51404ee'
+)
+```
+
+## Error Handling
+
+```python
+from impacket.dcerpc.v5.dcom.wmi import DCERPCSessionError
+from impacket.dcerpc.v5.rpcrt import DCERPCException
+
+try:
+    dcom = DCOMConnection('192.168.1.100', 'user', 'wrongpass')
+except DCERPCSessionError as e:
+    print(f"Authentication failed: {e}")
+except DCERPCException as e:
+    print(f"DCOM error: {e}")
+except Exception as e:
+    print(f"Connection error: {e}")
+```
+
+## DCOM Port Requirements
+
+- **TCP 135**: RPC Endpoint Mapper
+- **TCP 49152-65535**: Dynamic RPC ports (Windows 2008+)
+- **TCP 1024-5000**: Dynamic RPC ports (older Windows)
+
+To restrict DCOM to specific ports, configure the server's RPC settings.
+
+## Security Considerations
+
+1. **Authentication**: DCOM requires valid credentials
+2. **Privileges**: WMI access requires local admin rights
+3. **Firewall**: DCOM uses dynamic ports that may be blocked
+4. **Logging**: WMI activity is logged in Windows Event Logs
+5. **Detection**: WMI process creation is commonly monitored by EDR
+
+## Best Practices
+
+1. Always disconnect DCOM connections properly
+2. Handle exceptions for network and authentication errors
+3. Use specific WQL queries instead of `SELECT *` for performance
+4. Clean up WMI event subscriptions after use
+5. Consider using `RemRelease()` for interface cleanup
+
+## References
+
+- [MS-DCOM]: Distributed Component Object Model (DCOM) Remote Protocol
+- [MS-WMI]: Windows Management Instrumentation Remote Protocol
+- [MS-WMIO]: Windows Management Instrumentation Encoding
+- WQL (WMI Query Language) Documentation

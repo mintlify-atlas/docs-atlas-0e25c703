@@ -1,0 +1,231 @@
+---
+title: "Examples & Tools Overview"
+description: "Comprehensive collection of network protocol tools and security examples"
+---
+
+Impacket includes a powerful collection of example scripts and tools for working with network protocols, particularly focused on Windows network security testing and research.
+
+## Tool Categories
+
+The examples are organized into functional categories:
+
+<CardGroup cols={2}>
+  <Card title="Remote Execution" icon="terminal" href="/examples/remote-execution">
+    Execute commands on remote systems via various protocols
+  </Card>
+  <Card title="Credential Dumping" icon="key" href="/examples/credential-dumping">
+    Extract credentials from remote and local systems
+  </Card>
+  <Card title="Kerberos Attacks" icon="shield-halved" href="/examples/kerberos-attacks">
+    Kerberoasting, AS-REP roasting, and ticket manipulation
+  </Card>
+  <Card title="LDAP Operations" icon="sitemap" href="/examples/ldap-operations">
+    Active Directory enumeration and manipulation
+  </Card>
+  <Card title="SMB Operations" icon="folder-open" href="/examples/smb-operations">
+    File sharing, registry access, and SMB enumeration
+  </Card>
+</CardGroup>
+
+## Common Authentication Options
+
+Most tools support multiple authentication methods:
+
+<Tabs>
+  <Tab title="Password">
+    ```bash
+    tool.py DOMAIN/username:password@target
+    ```
+  </Tab>
+  <Tab title="NTLM Hash">
+    ```bash
+    tool.py DOMAIN/username@target -hashes LMHASH:NTHASH
+    # Pass-the-Hash (empty LM hash)
+    tool.py DOMAIN/username@target -hashes :NTHASH
+    ```
+  </Tab>
+  <Tab title="Kerberos">
+    ```bash
+    # Using password
+    tool.py DOMAIN/username:password@target -k -dc-ip DC_IP
+    
+    # Using ticket cache (KRB5CCNAME)
+    export KRB5CCNAME=/path/to/ticket.ccache
+    tool.py DOMAIN/username@target -k -no-pass
+    ```
+  </Tab>
+  <Tab title="AES Key">
+    ```bash
+    tool.py DOMAIN/username@target -aesKey AES256_KEY -k -dc-ip DC_IP
+    ```
+  </Tab>
+</Tabs>
+
+## Installation & Usage
+
+After installing Impacket, all example scripts are available as command-line tools:
+
+```bash
+# Install Impacket
+pip install impacket
+
+# Or from source
+git clone https://github.com/fortra/impacket
+cd impacket
+pip install .
+
+# Run examples
+psexec.py --help
+secretsdump.py --help
+```
+
+## Quick Reference
+
+### Remote Execution Tools
+
+| Tool | Protocol | Execution Context | Stealth |
+|------|----------|-------------------|----------|
+| **psexec.py** | SMB + Service Control | SYSTEM | Low (Event logs) |
+| **smbexec.py** | SMB + Service Control | SYSTEM | Low (Event logs) |
+| **wmiexec.py** | DCOM/WMI | Admin user | Medium |
+| **dcomexec.py** | DCOM Objects | Admin user | Medium |
+| **atexec.py** | Task Scheduler | SYSTEM | Medium |
+
+### Credential Dumping Tools
+
+| Tool | Target | Method | Requires |
+|------|--------|--------|----------|
+| **secretsdump.py** | SAM, NTDS, LSA | Remote registry/DCSync | Admin/DC Replication |
+| **Get-GPPPassword.py** | GPP passwords | SYSVOL parsing | Domain user |
+| **GetLAPSPassword.py** | LAPS passwords | LDAP queries | Delegated permissions |
+
+### Kerberos Attack Tools
+
+| Tool | Attack Type | Output Format | Usage |
+|------|-------------|---------------|-------|
+| **GetUserSPNs.py** | Kerberoasting | JtR/Hashcat | Request TGS for cracking |
+| **GetNPUsers.py** | AS-REP Roasting | JtR/Hashcat | Find users without pre-auth |
+| **ticketer.py** | Golden/Silver Ticket | .ccache | Forge Kerberos tickets |
+| **getTGT.py** | TGT Request | .ccache | Request TGT with credentials |
+
+## Output Formats
+
+Many tools support multiple output formats:
+
+<CodeGroup>
+```bash John the Ripper
+GetUserSPNs.py -request domain/user:pass@dc -outputfile hashes.txt
+john --wordlist=rockyou.txt hashes.txt
+```
+
+```bash Hashcat
+GetNPUsers.py domain/user:pass@dc -format hashcat -outputfile hashes.txt
+hashcat -m 18200 hashes.txt wordlist.txt
+```
+
+```bash CCache Tickets
+getTGT.py domain/user:password -dc-ip 10.0.0.1
+export KRB5CCNAME=user.ccache
+psexec.py domain/user@target -k -no-pass
+```
+</CodeGroup>
+
+## Common Parameters
+
+<AccordionGroup>
+  <Accordion title="-debug">
+    Enable verbose debug output to troubleshoot connection issues
+  </Accordion>
+  <Accordion title="-dc-ip">
+    Specify Domain Controller IP address (required for Kerberos)
+  </Accordion>
+  <Accordion title="-target-ip">
+    Target machine IP when using NetBIOS names
+  </Accordion>
+  <Accordion title="-port">
+    Specify custom port (default: 445 for SMB, 88 for Kerberos)
+  </Accordion>
+  <Accordion title="-k">
+    Use Kerberos authentication instead of NTLM
+  </Accordion>
+  <Accordion title="-no-pass">
+    Don't prompt for password (use with -k and KRB5CCNAME)
+  </Accordion>
+  <Accordion title="-ts">
+    Add timestamps to logging output
+  </Accordion>
+</AccordionGroup>
+
+## Security Considerations
+
+<Warning>
+  These tools are designed for authorized security testing and research only. Unauthorized access to computer systems is illegal.
+</Warning>
+
+### Best Practices
+
+- **Always obtain proper authorization** before testing
+- **Use dedicated test environments** when learning
+- **Monitor for detection** - understand what logs are generated
+- **Use encrypted channels** when possible (Kerberos, LDAPS)
+- **Clean up artifacts** - remove created accounts, services, files
+
+## Troubleshooting
+
+<Tabs>
+  <Tab title="Connection Issues">
+    ```bash
+    # Test SMB connectivity
+    smbclient.py domain/user@target
+    
+    # Check with debug output
+    tool.py domain/user@target -debug
+    
+    # Verify port access
+    nc -zv target 445
+    nc -zv target 135  # For WMI/DCOM
+    ```
+  </Tab>
+  <Tab title="Kerberos Errors">
+    ```bash
+    # Clock skew issues
+    sudo ntpdate dc-ip
+    
+    # KDC unreachable
+    # Ensure -dc-ip points to DC
+    tool.py domain/user@target -k -dc-ip DC_IP
+    
+    # Check ticket cache
+    klist
+    export KRB5CCNAME=/path/to/ticket.ccache
+    ```
+  </Tab>
+  <Tab title="Authentication Failures">
+    ```bash
+    # Verify credentials
+    crackmapexec smb target -u user -p password
+    
+    # Test with different auth methods
+    tool.py -hashes :NTHASH  # Pass-the-hash
+    tool.py -k -no-pass      # Kerberos ticket
+    tool.py -aesKey KEY -k   # AES key
+    ```
+  </Tab>
+</Tabs>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Remote Execution" icon="terminal" href="/examples/remote-execution">
+    Learn how to execute commands remotely
+  </Card>
+  <Card title="Credential Dumping" icon="key" href="/examples/credential-dumping">
+    Extract and dump credentials
+  </Card>
+  <Card title="Kerberos Attacks" icon="shield-halved" href="/examples/kerberos-attacks">
+    Perform Kerberos-based attacks
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/smb">
+    Use Impacket in your own tools
+  </Card>
+</CardGroup>

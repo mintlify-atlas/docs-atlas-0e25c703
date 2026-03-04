@@ -1,0 +1,436 @@
+---
+title: 'ESE Database'
+description: 'Extensible Storage Engine database parser'
+---
+
+## Overview
+
+The `ese` module provides a parser for Microsoft Extensible Storage Engine (ESE) databases, commonly used in Windows for Active Directory (NTDS.dit), Windows Search, and other system components.
+
+## ESENT_DB Class
+
+Main class for opening and querying ESE databases.
+
+### Constructor
+
+```python
+from impacket.ese import ESENT_DB
+
+db = ESENT_DB('ntds.dit', isRemote=False)
+```
+
+#### Parameters
+
+- **fileName** (str): Path to ESE database file
+- **pageSize** (int): Database page size (default: 8192)
+- **isRemote** (bool): Whether file is remote (default: False)
+
+### Database Information
+
+```python
+# Get database version and page info
+print(f"Version: 0x{db._ESENT_DB__DBHeader['Version']:x}")
+print(f"Revision: 0x{db._ESENT_DB__DBHeader['FileFormatRevision']:x}")
+print(f"Page Size: {db._ESENT_DB__pageSize}")
+print(f"Total Pages: {db._ESENT_DB__totalPages}")
+```
+
+## Catalog Operations
+
+### printCatalog()
+
+Display database schema (tables, columns, indexes).
+
+```python
+db = ESENT_DB('ntds.dit')
+db.printCatalog()
+
+# Output:
+# [datatable]
+#     Columns
+#       1    DNT                     Signed long
+#       2    PDNT                    Signed long
+#       3    cn                      Text
+#       ...
+```
+
+### Table Structure
+
+The catalog contains:
+- **Tables**: Database tables
+- **Columns**: Column definitions with types and IDs
+- **Indexes**: Index definitions
+- **Long Values**: Large value storage references
+
+## Table Operations
+
+### openTable()
+
+Open a table for reading records.
+
+```python
+table_cursor = db.openTable('datatable')
+
+if table_cursor:
+    print("Table opened successfully")
+```
+
+#### Parameters
+
+- **tableName** (str/bytes): Name of table to open
+
+#### Returns
+
+Table cursor dictionary or None if table not found
+
+### getNextRow()
+
+Read the next row from a table.
+
+```python
+cursor = db.openTable('datatable')
+
+while True:
+    record = db.getNextRow(cursor)
+    if record is None:
+        break
+    
+    # Access columns
+    print(f"DNT: {record[b'DNT']}")
+    print(f"cn: {record[b'cn']}")
+```
+
+#### Parameters
+
+- **cursor** (dict): Table cursor from openTable()
+- **filter_tables** (list): Optional list of column names to retrieve
+
+#### Returns
+
+OrderedDict with column data or None when no more records
+
+## Column Types
+
+### Supported Types
+
+```python
+from impacket.ese import (
+    JET_coltypBit,          # Boolean
+    JET_coltypUnsignedByte, # Unsigned byte
+    JET_coltypShort,        # Signed short
+    JET_coltypLong,         # Signed long (4 bytes)
+    JET_coltypLongLong,     # Signed long long (8 bytes)
+    JET_coltypCurrency,     # Currency (8 bytes)
+    JET_coltypIEEESingle,   # Float
+    JET_coltypIEEEDouble,   # Double
+    JET_coltypDateTime,     # DateTime (8 bytes)
+    JET_coltypBinary,       # Binary data
+    JET_coltypText,         # Text string
+    JET_coltypLongBinary,   # Long binary
+    JET_coltypLongText,     # Long text
+    JET_coltypGUID,         # GUID (16 bytes)
+    JET_coltypUnsignedLong, # Unsigned long
+    JET_coltypUnsignedShort,# Unsigned short
+)
+```
+
+### ColumnTypeToName
+
+Map column type to human-readable name:
+
+```python
+from impacket.ese import ColumnTypeToName
+
+type_id = 4  # JET_coltypLong
+print(ColumnTypeToName[type_id])  # "Signed long"
+```
+
+## String Codepages
+
+### StringCodePages
+
+Supported text encodings:
+
+```python
+from impacket.ese import (
+    CODEPAGE_UNICODE,  # 1200 - UTF-16LE
+    CODEPAGE_ASCII,    # 20127 - ASCII
+    CODEPAGE_WESTERN,  # 1252 - Windows-1252
+)
+```
+
+## Complete Examples
+
+### Extract NTDS.dit Users
+
+```python
+from impacket.ese import ESENT_DB
+from binascii import hexlify
+
+db = ESENT_DB('ntds.dit')
+
+# Open datatable
+cursor = db.openTable('datatable')
+
+users = []
+while True:
+    record = db.getNextRow(cursor)
+    if record is None:
+        break
+    
+    # Filter for user objects
+    if record.get(b'sAMAccountType') == 805306368:  # SAM_USER_OBJECT
+        user = {
+            'username': record.get(b'sAMAccountName', ''),
+            'sid': record.get(b'objectSid', b''),
+            'dn': record.get(b'distinguishedName', '')
+        }
+        
+        # Get password hash
+        if b'unicodePwd' in record and record[b'unicodePwd']:
+            user['nthash'] = hexlify(record[b'unicodePwd']).decode()
+        
+        users.append(user)
+        print(f"User: {user['username']}")
+        if user.get('nthash'):
+            print(f"  NT Hash: {user['nthash']}")
+
+db.close()
+print(f"\nTotal users found: {len(users)}")
+```
+
+### Query Specific Columns
+
+```python
+from impacket.ese import ESENT_DB
+
+db = ESENT_DB('ntds.dit')
+cursor = db.openTable('datatable')
+
+# Only retrieve specific columns
+filter_columns = [
+    b'sAMAccountName',
+    b'userPrincipalName',
+    b'memberOf',
+    b'objectSid'
+]
+
+while True:
+    record = db.getNextRow(cursor, filter_tables=filter_columns)
+    if record is None:
+        break
+    
+    if record.get(b'sAMAccountName'):
+        print(f"Account: {record[b'sAMAccountName']}")
+        if record.get(b'memberOf'):
+            # Multi-valued attribute
+            groups = record[b'memberOf']
+            print(f"  Groups: {groups}")
+
+db.close()
+```
+
+### Enumerate All Tables
+
+```python
+from impacket.ese import ESENT_DB
+
+db = ESENT_DB('database.edb')
+
+tables = db._ESENT_DB__tables
+
+for table_name, table_info in tables.items():
+    print(f"\n[{table_name.decode('utf-8')}]")
+    
+    # List columns
+    print("  Columns:")
+    for col_name, col_info in table_info['Columns'].items():
+        col_record = col_info['Record']
+        col_id = col_record['Identifier']
+        col_type = col_record['ColumnType']
+        from impacket.ese import ColumnTypeToName
+        type_name = ColumnTypeToName.get(col_type, f"Unknown({col_type})")
+        print(f"    {col_id:5d} {col_name.decode('utf-8'):30s} {type_name}")
+    
+    # List indexes
+    if table_info['Indexes']:
+        print("  Indexes:")
+        for idx_name in table_info['Indexes'].keys():
+            print(f"    {idx_name.decode('utf-8')}")
+
+db.close()
+```
+
+### Handle Long Values
+
+```python
+from impacket.ese import ESENT_DB
+from binascii import hexlify
+
+db = ESENT_DB('ntds.dit')
+cursor = db.openTable('datatable')
+
+while True:
+    record = db.getNextRow(cursor)
+    if record is None:
+        break
+    
+    # Long values are returned as hex strings or raw bytes
+    for col_name, col_value in record.items():
+        if col_value and isinstance(col_value, bytes) and len(col_value) > 1000:
+            print(f"{col_name.decode('utf-8')}: <long value {len(col_value)} bytes>")
+        elif col_value:
+            print(f"{col_name.decode('utf-8')}: {col_value}")
+    
+    break  # Just show first record
+
+db.close()
+```
+
+### Extract with Date Conversion
+
+```python
+from impacket.ese import ESENT_DB, getUnixTime
+from datetime import datetime, timezone
+
+db = ESENT_DB('ntds.dit')
+cursor = db.openTable('datatable')
+
+record = db.getNextRow(cursor)
+
+# Convert Windows FILETIME to Unix timestamp
+if b'whenCreated' in record and record[b'whenCreated']:
+    filetime = record[b'whenCreated']
+    unix_time = getUnixTime(filetime)
+    dt = datetime.fromtimestamp(unix_time, tz=timezone.utc)
+    print(f"Created: {dt}")
+
+db.close()
+```
+
+## Database State
+
+### Database States
+
+```python
+from impacket.ese import (
+    JET_dbstateJustCreated,    # 1
+    JET_dbstateDirtyShutdown,  # 2 - Needs recovery
+    JET_dbstateCleanShutdown,  # 3 - Normal state
+    JET_dbstateBeingConverted, # 4
+    JET_dbstateForceDetach,    # 5
+)
+
+db = ESENT_DB('ntds.dit')
+db_state = db._ESENT_DB__DBHeader['DBState']
+
+if db_state == JET_dbstateDirtyShutdown:
+    print("Warning: Database was not shut down cleanly")
+```
+
+## Utility Functions
+
+### getUnixTime()
+
+Convert Windows FILETIME to Unix timestamp.
+
+```python
+from impacket.ese import getUnixTime
+
+filetime = 132598752000000000  # Windows FILETIME
+unix_time = getUnixTime(filetime)
+print(unix_time)  # 1615910400
+```
+
+#### Parameters
+
+- **t** (int): Windows FILETIME (100-nanosecond intervals since 1601-01-01)
+
+#### Returns
+
+Unix timestamp (seconds since 1970-01-01)
+
+## Low-Level Operations
+
+### getPage()
+
+Read a specific database page.
+
+```python
+page = db.getPage(page_number)
+
+# Returns ESENT_PAGE object
+if page:
+    print(f"Page flags: 0x{page.record['PageFlags']:x}")
+    print(f"Available data: {page.record['AvailableDataSize']}")
+```
+
+### close()
+
+Close the database file.
+
+```python
+db = ESENT_DB('database.edb')
+# ... operations ...
+db.close()
+```
+
+## Page Flags
+
+```python
+from impacket.ese import (
+    FLAGS_ROOT,         # 0x01 - Root page
+    FLAGS_LEAF,         # 0x02 - Leaf page
+    FLAGS_PARENT,       # 0x04 - Parent page
+    FLAGS_EMPTY,        # 0x08 - Empty page
+    FLAGS_SPACE_TREE,   # 0x20 - Space tree
+    FLAGS_INDEX,        # 0x40 - Index page
+    FLAGS_LONG_VALUE,   # 0x80 - Long value
+)
+```
+
+## Performance Tips
+
+1. **Filter columns** - Use `filter_tables` to retrieve only needed columns
+2. **Close database** - Always close when done to release file handle
+3. **Batch processing** - Process records in batches for large databases
+4. **Index awareness** - Understanding indexes can help with query planning
+5. **Remote files** - Set `isRemote=True` for remote file objects
+
+## Limitations
+
+- **Read-only** - The parser only supports reading, not writing
+- **Recovery** - Dirty databases may have incomplete data
+- **Multi-values** - Multi-valued attributes returned as hex strings
+- **Long values** - Some long values may not be fully parsed
+- **Transactions** - No transaction log replay support
+
+## Common Use Cases
+
+### NTDS.dit Analysis
+
+Extract Active Directory data:
+- User accounts and hashes
+- Computer accounts  
+- Group memberships
+- Domain trusts
+- Security descriptors
+
+### Windows Search
+
+Query search index:
+- Indexed documents
+- File metadata
+- Search history
+
+### Exchange Databases
+
+Access mailbox data:
+- Message store
+- Folder structure  
+- Attachments
+
+## References
+
+- [ESE Database Format](http://forensic-proof.com/wp-content/uploads/2011/07/Extensible-Storage-Engine-ESE-Database-File-EDB-format.pdf)
+- [NTDS.dit File Format](https://docs.microsoft.com/en-us/previous-versions/windows/it-pro/windows-2000-server/cc961761(v=technet.10))

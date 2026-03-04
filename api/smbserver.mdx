@@ -1,0 +1,591 @@
+---
+title: 'SMBServer'
+description: 'SMB server implementation for creating custom SMB file servers'
+---
+
+## Overview
+
+The `smbserver` module provides a complete SMB server implementation that allows you to create custom SMB file servers. This is useful for penetration testing, creating honeypots, or implementing custom file sharing services.
+
+## Key Classes
+
+### SimpleSMBServer
+
+Easy-to-use SMB server with minimal configuration.
+
+```python
+from impacket import smbserver
+
+server = smbserver.SimpleSMBServer(listenAddress='0.0.0.0', 
+                                    listenPort=445)
+server.addShare('SHARE', '/tmp/share', 'Share description')
+server.setSMB2Support(True)
+server.start()
+```
+
+<ParamField path="listenAddress" type="str" default="'0.0.0.0'">
+  IP address to bind the server to
+</ParamField>
+
+<ParamField path="listenPort" type="int" default="445">
+  Port to listen on (445 for SMB, 139 for NetBIOS)
+</ParamField>
+
+### SMBSERVER
+
+Advanced SMB server class with full control over configuration.
+
+```python
+from impacket import smbserver
+import configparser
+
+config = configparser.ConfigParser()
+config.add_section('global')
+config.set('global', 'server_name', 'FILESERVER')
+config.set('global', 'server_os', 'Windows 10')
+config.set('global', 'log_file', '/var/log/smb.log')
+
+server = smbserver.SMBSERVER(('0.0.0.0', 445), config_parser=config)
+server.processConfigFile()
+server.serve_forever()
+```
+
+<ParamField path="address" type="tuple" required>
+  Tuple of (host, port) to bind to
+</ParamField>
+
+<ParamField path="config_parser" type="ConfigParser" required>
+  Configuration object defining server behavior and shares
+</ParamField>
+
+## Server Configuration
+
+### Global Settings
+
+The global section defines server-wide settings:
+
+```python
+import configparser
+
+config = configparser.ConfigParser()
+config.add_section('global')
+
+# Server identification
+config.set('global', 'server_name', 'FILESERVER')
+config.set('global', 'server_os', 'Windows 10 Pro')
+config.set('global', 'server_domain', 'WORKGROUP')
+
+# Authentication
+config.set('global', 'challenge', '4141414141414141')  # 8-byte hex
+
+# Logging
+config.set('global', 'log_file', '/var/log/smb.log')
+config.set('global', 'credentials_file', '/tmp/hashes.txt')
+
+# SMB2 support
+config.set('global', 'SMB2Support', 'True')
+```
+
+<ParamField path="server_name" type="str">
+  NetBIOS name of the server
+</ParamField>
+
+<ParamField path="server_os" type="str">
+  Operating system string returned to clients
+</ParamField>
+
+<ParamField path="server_domain" type="str">
+  Domain or workgroup name
+</ParamField>
+
+<ParamField path="challenge" type="str">
+  NTLM challenge (16-character hex string)
+</ParamField>
+
+<ParamField path="log_file" type="str">
+  Path to log file for server activity
+</ParamField>
+
+<ParamField path="credentials_file" type="str">
+  Path to file where captured credentials are written
+</ParamField>
+
+<ParamField path="SMB2Support" type="str">
+  Enable SMB2/SMB3 support ('True' or 'False')
+</ParamField>
+
+### Share Configuration
+
+Define shared directories:
+
+```python
+config.add_section('SHARE')
+config.set('SHARE', 'comment', 'Public share')
+config.set('SHARE', 'read only', 'no')
+config.set('SHARE', 'share type', '0')  # Disk share
+config.set('SHARE', 'path', '/tmp/share')
+```
+
+<ParamField path="comment" type="str">
+  Description of the share
+</ParamField>
+
+<ParamField path="read only" type="str">
+  Whether the share is read-only ('yes' or 'no')
+</ParamField>
+
+<ParamField path="share type" type="str">
+  Share type:
+  - `'0'` - Disk share (SHARED_DISK)
+  - `'1'` - Print queue (SHARED_PRINT_QUEUE)
+  - `'3'` - IPC (SHARED_IPC)
+</ParamField>
+
+<ParamField path="path" type="str" required>
+  Local filesystem path to share
+</ParamField>
+
+## SimpleSMBServer Methods
+
+### addShare()
+
+Add a new share to the server.
+
+```python
+server.addShare(name, path, comment='', readOnly=False)
+```
+
+<ParamField path="name" type="str" required>
+  Share name (e.g., 'SHARE', 'C$')
+</ParamField>
+
+<ParamField path="path" type="str" required>
+  Local filesystem path
+</ParamField>
+
+<ParamField path="comment" type="str" default="''">
+  Share description
+</ParamField>
+
+<ParamField path="readOnly" type="bool" default="False">
+  Whether share is read-only
+</ParamField>
+
+### removeShare()
+
+Remove a share from the server.
+
+```python
+server.removeShare(name)
+```
+
+<ParamField path="name" type="str" required>
+  Name of share to remove
+</ParamField>
+
+### setSMB2Support()
+
+Enable or disable SMB2/SMB3 support.
+
+```python
+server.setSMB2Support(enabled)
+```
+
+<ParamField path="enabled" type="bool" required>
+  `True` to enable SMB2/SMB3, `False` for SMB1 only
+</ParamField>
+
+### setLogFile()
+
+Set the log file path.
+
+```python
+server.setLogFile(filename)
+```
+
+<ParamField path="filename" type="str" required>
+  Path to log file
+</ParamField>
+
+### addCredential()
+
+Add authentication credentials.
+
+```python
+server.addCredential(username, password, domain='', 
+                      lmhash='', nthash='')
+```
+
+<ParamField path="username" type="str" required>
+  Username to accept
+</ParamField>
+
+<ParamField path="password" type="str" required>
+  Password to accept
+</ParamField>
+
+<ParamField path="domain" type="str" default="''">
+  Domain name
+</ParamField>
+
+<ParamField path="lmhash" type="str" default="''">
+  LM hash
+</ParamField>
+
+<ParamField path="nthash" type="str" default="''">
+  NT hash
+</ParamField>
+
+### start()
+
+Start the SMB server (blocking).
+
+```python
+server.start()
+```
+
+### stop()
+
+Stop the SMB server.
+
+```python
+server.stop()
+```
+
+## Callback Hooks
+
+Customize server behavior by registering callback functions.
+
+### registerNamedPipe()
+
+Register a handler for named pipe operations.
+
+```python
+def pipe_handler(tid, user, data):
+    print(f"Pipe accessed by {user}: {data}")
+    return b"Response data"
+
+server.registerNamedPipe('srvsvc', pipe_handler)
+```
+
+<ParamField path="pipeName" type="str" required>
+  Name of the pipe (without `\\PIPE\\` prefix)
+</ParamField>
+
+<ParamField path="callback" type="callable" required>
+  Function with signature `(tid, user, data) -> bytes`
+</ParamField>
+
+### setSMBChallenge()
+
+Set a custom NTLM challenge.
+
+```python
+server.setSMBChallenge('4141414141414141')  # 8-byte hex
+```
+
+<ParamField path="challenge" type="str" required>
+  16-character hex string representing 8 bytes
+</ParamField>
+
+## Usage Examples
+
+### Simple File Server
+
+```python
+from impacket import smbserver
+import os
+
+# Create share directory
+os.makedirs('/tmp/myshare', exist_ok=True)
+
+# Create and configure server
+server = smbserver.SimpleSMBServer(listenAddress='0.0.0.0',
+                                    listenPort=445)
+
+# Add shares
+server.addShare('SHARE', '/tmp/myshare', 'Public Files')
+server.addShare('READONLY', '/tmp/readonly', 'Read-Only Files',
+                 readOnly=True)
+
+# Enable SMB2
+server.setSMB2Support(True)
+
+# Set log file
+server.setLogFile('/var/log/smbserver.log')
+
+print("SMB Server started on 0.0.0.0:445")
+try:
+    server.start()
+except KeyboardInterrupt:
+    print("\nShutting down...")
+    server.stop()
+```
+
+### Authenticated Server
+
+```python
+from impacket import smbserver
+
+server = smbserver.SimpleSMBServer()
+
+# Add valid credentials
+server.addCredential('admin', 'P@ssw0rd', 'WORKGROUP')
+server.addCredential('user', 'password123', 'WORKGROUP')
+
+# Add share
+server.addShare('FILES', '/tmp/files')
+
+try:
+    server.start()
+except KeyboardInterrupt:
+    server.stop()
+```
+
+### Credential Harvesting Server
+
+```python
+from impacket import smbserver
+import threading
+
+def start_smb_server():
+    server = smbserver.SimpleSMBServer()
+    
+    # Set custom challenge for consistency
+    server.setSMBChallenge('1122334455667788')
+    
+    # Log credentials to file
+    server.setLogFile('/tmp/smb_hashes.txt')
+    
+    # Add a honey share
+    server.addShare('ADMIN$', '/tmp/fake_admin', 'Admin Share')
+    server.addShare('C$', '/tmp/fake_c', 'C Drive')
+    
+    # Enable SMB2 for modern clients
+    server.setSMB2Support(True)
+    
+    print("[*] SMB Server listening...")
+    print("[*] Captured hashes will be written to /tmp/smb_hashes.txt")
+    
+    try:
+        server.start()
+    except KeyboardInterrupt:
+        print("\n[*] Stopping server...")
+        server.stop()
+
+# Run in separate thread if needed
+server_thread = threading.Thread(target=start_smb_server)
+server_thread.daemon = True
+server_thread.start()
+
+# Keep main thread alive
+try:
+    server_thread.join()
+except KeyboardInterrupt:
+    pass
+```
+
+### Advanced Configuration
+
+```python
+from impacket import smbserver
+import configparser
+import socket
+
+# Create configuration
+config = configparser.ConfigParser()
+
+# Global settings
+config.add_section('global')
+config.set('global', 'server_name', 'FILESERVER')
+config.set('global', 'server_os', 'Windows Server 2019')
+config.set('global', 'server_domain', 'CORP')
+config.set('global', 'log_file', '/var/log/smbserver.log')
+config.set('global', 'credentials_file', '/var/log/smb_creds.txt')
+config.set('global', 'SMB2Support', 'True')
+config.set('global', 'challenge', 'A'*16)  # Fixed challenge
+
+# Public share
+config.add_section('PUBLIC')
+config.set('PUBLIC', 'comment', 'Public file share')
+config.set('PUBLIC', 'read only', 'no')
+config.set('PUBLIC', 'share type', '0')
+config.set('PUBLIC', 'path', '/srv/samba/public')
+
+# Private share
+config.add_section('PRIVATE')
+config.set('PRIVATE', 'comment', 'Private files')
+config.set('PRIVATE', 'read only', 'yes')
+config.set('PRIVATE', 'share type', '0')
+config.set('PRIVATE', 'path', '/srv/samba/private')
+
+# IPC share for RPC
+config.add_section('IPC$')
+config.set('IPC$', 'comment', 'IPC Service')
+config.set('IPC$', 'read only', 'yes')
+config.set('IPC$', 'share type', '3')
+config.set('IPC$', 'path', '')
+
+# Create and start server
+server = smbserver.SMBSERVER(('0.0.0.0', 445), 
+                              config_parser=config)
+server.processConfigFile()
+
+print(f"SMB Server started on {socket.gethostname()}")
+print("Available shares: PUBLIC, PRIVATE, IPC$")
+
+try:
+    server.serve_forever()
+except KeyboardInterrupt:
+    print("\nShutting down...")
+    server.shutdown()
+```
+
+### Custom Named Pipe Handler
+
+```python
+from impacket import smbserver
+import struct
+
+def handle_srvsvc_pipe(tid, user, data):
+    """
+    Custom handler for srvsvc pipe (Server Service)
+    """
+    print(f"[*] SRVSVC pipe accessed by {user}")
+    print(f"[*] Data received ({len(data)} bytes)")
+    
+    # Parse DCE/RPC header if needed
+    # Return response or empty bytes
+    return b''
+
+def handle_custom_pipe(tid, user, data):
+    """
+    Handler for custom named pipe
+    """
+    print(f"[*] Custom pipe accessed by {user}")
+    
+    # Echo back the data
+    return data
+
+# Create server
+server = smbserver.SimpleSMBServer()
+
+# Register pipe handlers
+server.registerNamedPipe('srvsvc', handle_srvsvc_pipe)
+server.registerNamedPipe('custom', handle_custom_pipe)
+
+# Add IPC$ share for pipes
+server.addShare('IPC$', '', 'IPC Service')
+
+server.start()
+```
+
+### Multi-threaded Server
+
+```python
+from impacket import smbserver
+import threading
+import time
+
+class ManagedSMBServer:
+    def __init__(self, address='0.0.0.0', port=445):
+        self.server = smbserver.SimpleSMBServer(
+            listenAddress=address,
+            listenPort=port
+        )
+        self.thread = None
+        self.running = False
+    
+    def add_share(self, name, path, comment='', read_only=False):
+        self.server.addShare(name, path, comment, read_only)
+    
+    def start(self):
+        """Start server in background thread"""
+        if self.running:
+            return
+        
+        self.running = True
+        self.thread = threading.Thread(target=self._run)
+        self.thread.daemon = True
+        self.thread.start()
+        print("[+] SMB Server started")
+    
+    def _run(self):
+        try:
+            self.server.start()
+        except Exception as e:
+            print(f"[-] Server error: {e}")
+            self.running = False
+    
+    def stop(self):
+        """Stop the server"""
+        if not self.running:
+            return
+        
+        print("[*] Stopping SMB Server...")
+        self.server.stop()
+        self.running = False
+        if self.thread:
+            self.thread.join(timeout=5)
+        print("[+] Server stopped")
+
+# Usage
+managed_server = ManagedSMBServer()
+managed_server.add_share('FILES', '/tmp/files')
+managed_server.start()
+
+try:
+    # Do other work while server runs
+    while True:
+        time.sleep(1)
+except KeyboardInterrupt:
+    managed_server.stop()
+```
+
+## Security Considerations
+
+<Warning>
+  Running an SMB server requires root/administrator privileges to bind to port 445. Always run with appropriate security measures.
+</Warning>
+
+<Note>
+  The credential harvesting capabilities should only be used for authorized security testing. Capturing credentials without permission is illegal.
+</Note>
+
+### Best Practices
+
+1. **Use authentication** - Always configure credentials unless running a public share
+2. **Limit share access** - Only share necessary directories
+3. **Monitor logs** - Regularly check log files for suspicious activity
+4. **Set read-only where possible** - Minimize write access to prevent abuse
+5. **Use SMB2/SMB3** - Enable modern protocol support for better security
+
+## Helper Functions
+
+### getShares()
+
+Get list of configured shares.
+
+```python
+from impacket.smbserver import getShares
+
+shares = getShares(connId, smbServer)
+```
+
+### searchShare()
+
+Find a specific share by name.
+
+```python
+from impacket.smbserver import searchShare
+
+share_config = searchShare(connId, 'SHARE', smbServer)
+if share_config:
+    print(f"Path: {share_config['path']}")
+```
+
+## See Also
+
+- [SMBConnection](/api/smbconnection) - SMB client implementation
+- [SMB](/api/smb) - Low-level SMB protocol
+- [NTLM](/api/ntlm) - NTLM authentication

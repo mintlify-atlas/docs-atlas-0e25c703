@@ -1,0 +1,321 @@
+---
+title: 'LDAPConnection'
+description: 'Main class for LDAP protocol operations'
+---
+
+## LDAPConnection Class
+
+The `LDAPConnection` class provides the primary interface for LDAP operations against directory services.
+
+### Constructor
+
+```python
+LDAPConnection(url, baseDN='', dstIp=None, signing=True)
+```
+
+#### Parameters
+
+- **url** (str): LDAP URL in format `ldap://host`, `ldaps://host`, or `gc://host`
+- **baseDN** (str): Default base DN for searches (e.g., 'DC=example,DC=com')
+- **dstIp** (str): Destination IP address (optional, overrides hostname resolution)
+- **signing** (bool): Enable LDAP signing (default: True, disabled for LDAPS/GC)
+
+#### Example
+
+```python
+from impacket.ldap import ldap
+
+conn = ldap.LDAPConnection(
+    'ldap://dc01.example.com',
+    baseDN='DC=example,DC=com'
+)
+```
+
+## Authentication Methods
+
+### login()
+
+Authenticate using NTLM or simple authentication.
+
+```python
+login(user='', password='', domain='', lmhash='', nthash='', authenticationChoice='sasl')
+```
+
+#### Parameters
+
+- **user** (str): Username
+- **password** (str): Password for the user
+- **domain** (str): Domain where the account is valid
+- **lmhash** (str): LM hash for pass-the-hash authentication
+- **nthash** (str): NT hash for pass-the-hash authentication  
+- **authenticationChoice** (str): Authentication type ('sasl', 'simple', 'sicilyNegotiate', 'sicilyPackageDiscovery')
+
+#### Example
+
+```python
+# Password authentication
+conn.login(user='admin', password='P@ssw0rd', domain='EXAMPLE')
+
+# Pass-the-hash
+conn.login(
+    user='admin',
+    domain='EXAMPLE',
+    nthash='8846f7eaee8fb117ad06bdd830b7586c'
+)
+```
+
+### kerberosLogin()
+
+Authenticate using Kerberos protocol.
+
+```python
+kerberosLogin(user, password, domain='', lmhash='', nthash='', aesKey='', 
+              kdcHost=None, TGT=None, TGS=None, useCache=True)
+```
+
+#### Parameters
+
+- **user** (str): Username
+- **password** (str): Password for the user
+- **domain** (str): Domain (required for Kerberos)
+- **lmhash** (str): LM hash (used if RC4_HMAC is supported)
+- **nthash** (str): NT hash (used if RC4_HMAC is supported)
+- **aesKey** (str): AES256 or AES128 key for Kerberos
+- **kdcHost** (str): KDC hostname or IP
+- **TGT** (dict): Pre-obtained TGT structure
+- **TGS** (dict): Pre-obtained TGS structure
+- **useCache** (bool): Use credential cache (default: True)
+
+#### Example
+
+```python
+conn.kerberosLogin(
+    user='admin',
+    password='P@ssw0rd',
+    domain='EXAMPLE.COM',
+    kdcHost='dc01.example.com'
+)
+```
+
+## Search Operations
+
+### search()
+
+Perform LDAP search with optional paging support.
+
+```python
+search(searchBase=None, scope=None, derefAliases=None, sizeLimit=0, 
+       timeLimit=0, typesOnly=False, searchFilter='(objectClass=*)', 
+       attributes=None, searchControls=None, perRecordCallback=None)
+```
+
+#### Parameters
+
+- **searchBase** (str): Base DN for the search (uses baseDN if None)
+- **scope** (Scope): Search scope (baseObject, singleLevel, wholeSubtree)
+- **derefAliases** (DerefAliases): How to dereference aliases
+- **sizeLimit** (int): Maximum number of entries to return (0 = unlimited)
+- **timeLimit** (int): Maximum time in seconds (0 = unlimited)
+- **typesOnly** (bool): Return only attribute types, not values
+- **searchFilter** (str): LDAP filter string
+- **attributes** (list): List of attribute names to return
+- **searchControls** (list): LDAP controls (e.g., paging)
+- **perRecordCallback** (callable): Function called for each result
+
+#### Returns
+
+List of search result entries (unless perRecordCallback is used)
+
+#### Example
+
+```python
+from impacket.ldap.ldapasn1 import Scope
+
+# Find all users
+results = conn.search(
+    searchFilter='(objectClass=user)',
+    attributes=['sAMAccountName', 'mail', 'memberOf'],
+    scope=Scope('wholeSubtree')
+)
+
+for result in results:
+    if result['objectName']:
+        print(result['objectName'])
+        for attr in result['attributes']:
+            print(f"  {attr['type']}: {attr['vals']}")
+```
+
+## Modification Operations
+
+### add()
+
+Add a new entry to the directory.
+
+```python
+add(dn, objectClass, attributes=None, controls=None)
+```
+
+#### Parameters  
+
+- **dn** (str): Distinguished Name of the new entry
+- **objectClass** (tuple/list): Object classes for the entry
+- **attributes** (dict): Dictionary of attributes `{name: value}`
+- **controls** (list): LDAP controls
+
+#### Example
+
+```python
+conn.add(
+    dn='CN=NewComputer,CN=Computers,DC=example,DC=com',
+    objectClass=['top', 'computer'],
+    attributes={
+        'sAMAccountName': 'NEWPC$',
+        'userAccountControl': 4096,
+        'dNSHostName': 'newpc.example.com'
+    }
+)
+```
+
+### modify()
+
+Modify an existing entry.
+
+```python
+modify(dn, modifications, controls=None)
+```
+
+#### Parameters
+
+- **dn** (str): Distinguished Name of the entry to modify
+- **modifications** (dict): Dict of `{attribute: [(operation, values), ...]}`
+- **controls** (list): LDAP controls
+
+#### Operations
+
+- **MODIFY_ADD** (0): Add attribute values
+- **MODIFY_DELETE** (1): Delete attribute values  
+- **MODIFY_REPLACE** (2): Replace attribute values
+- **MODIFY_INCREMENT** (3): Increment attribute value
+
+#### Example
+
+```python
+from impacket.ldap.ldap import MODIFY_REPLACE, MODIFY_ADD
+
+conn.modify(
+    dn='CN=User,CN=Users,DC=example,DC=com',
+    modifications={
+        'description': [(MODIFY_REPLACE, 'New description')],
+        'proxyAddresses': [(MODIFY_ADD, ['smtp:user2@example.com'])]
+    }
+)
+```
+
+### modify_dn()
+
+Modify the Distinguished Name of an entry.
+
+```python
+modify_dn(dn, newrdn, deleteoldrdn=True, newSuperior=None, controls=None)
+```
+
+#### Parameters
+
+- **dn** (str): Current Distinguished Name
+- **newrdn** (str): New Relative Distinguished Name
+- **deleteoldrdn** (bool): Delete old RDN from entry
+- **newSuperior** (str): New parent DN (for moving entries)
+- **controls** (list): LDAP controls
+
+#### Example
+
+```python
+# Rename
+conn.modify_dn(
+    dn='CN=OldName,CN=Users,DC=example,DC=com',
+    newrdn='CN=NewName'
+)
+
+# Move to different OU
+conn.modify_dn(
+    dn='CN=User,CN=Users,DC=example,DC=com',
+    newrdn='CN=User',
+    newSuperior='OU=IT,DC=example,DC=com'
+)
+```
+
+### delete()
+
+Delete an entry from the directory.
+
+```python
+delete(dn, controls=None)
+```
+
+#### Parameters
+
+- **dn** (str): Distinguished Name of entry to delete
+- **controls** (list): LDAP controls
+
+#### Example
+
+```python
+conn.delete('CN=TempUser,CN=Users,DC=example,DC=com')
+```
+
+## Utility Methods
+
+### close()
+
+Close the LDAP connection.
+
+```python
+conn.close()
+```
+
+### sendReceive()
+
+Send an LDAP request and receive response (low-level method).
+
+```python
+sendReceive(request, controls=None)
+```
+
+## Exceptions
+
+### LDAPSessionError
+
+Raised when LDAP operations fail.
+
+```python
+try:
+    conn.add(dn='CN=Test', objectClass=['top'])
+except ldap.LDAPSessionError as e:
+    print(f"Error code: {e.getErrorCode()}")
+    print(f"Error: {e.getErrorString()}")
+```
+
+### LDAPSearchError
+
+Raised when search operations fail. Provides access to partial results.
+
+```python
+try:
+    results = conn.search(sizeLimit=10)
+except ldap.LDAPSearchError as e:
+    print(f"Search error: {e.getErrorString()}")
+    partial = e.getAnswers()  # Get partial results
+```
+
+## Constants
+
+### Modify Operations
+
+```python
+from impacket.ldap.ldap import (
+    MODIFY_ADD,       # 0 - Add attribute
+    MODIFY_DELETE,    # 1 - Delete attribute
+    MODIFY_REPLACE,   # 2 - Replace attribute
+    MODIFY_INCREMENT  # 3 - Increment attribute
+)
+```

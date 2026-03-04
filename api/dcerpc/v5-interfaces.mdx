@@ -1,0 +1,693 @@
+---
+title: "DCE/RPC V5 Interfaces"
+description: "Available RPC interfaces in Impacket's dcerpc/v5 implementation"
+---
+
+## Available Interfaces
+
+Impacket implements numerous Microsoft RPC interfaces in the `dcerpc/v5/` directory. Each interface provides protocol-specific functionality for Windows remote administration and security testing.
+
+## Service Management
+
+### SCMR - Service Control Manager
+
+**Module:** `impacket.dcerpc.v5.scmr`  
+**UUID:** `367ABB81-9844-35F1-AD32-98F038001003`  
+**Pipe:** `\\pipe\\svcctl`  
+**Protocol:** [MS-SCMR]
+
+From `scmr.py:1-100`:
+
+```python
+from impacket.dcerpc.v5 import scmr, transport
+
+string_binding = r'ncacn_np:192.168.1.10[\\pipe\\svcctl]'
+rpctransport = transport.DCERPCTransportFactory(string_binding)
+rpctransport.set_credentials('admin', 'password', 'DOMAIN')
+
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(scmr.MSRPC_UUID_SCMR)
+
+# Open Service Control Manager
+resp = scmr.hROpenSCManagerW(dce)
+scHandle = resp['lpScHandle']
+
+# Enumerate services
+resp = scmr.hREnumServicesStatusW(dce, scHandle)
+for service in resp['lpServices']:
+    print(f"{service['lpServiceName']}: {service['ServiceStatus']}")
+
+# Create service
+resp = scmr.hRCreateServiceW(
+    dce, scHandle,
+    lpServiceName='MyService',
+    lpDisplayName='My Service',
+    lpBinaryPathName='C:\\\\path\\\\to\\\\service.exe',
+    dwServiceType=scmr.SERVICE_WIN32_OWN_PROCESS,
+    dwStartType=scmr.SERVICE_DEMAND_START
+)
+
+# Start service
+serviceHandle = resp['lpServiceHandle']
+scmr.hRStartServiceW(dce, serviceHandle)
+
+dce.disconnect()
+```
+
+**Key Functions:**
+- `hROpenSCManagerW()` - Open SCM
+- `hROpenServiceW()` - Open service handle
+- `hRCreateServiceW()` - Create service
+- `hRStartServiceW()` - Start service
+- `hRControlService()` - Control service (stop, pause)
+- `hRDeleteService()` - Delete service
+- `hREnumServicesStatusW()` - Enumerate services
+- `hRQueryServiceConfigW()` - Get service configuration
+
+## Security & Authentication
+
+### SAMR - Security Account Manager
+
+**Module:** `impacket.dcerpc.v5.samr`  
+**UUID:** `12345778-1234-ABCD-EF00-0123456789AC`  
+**Pipe:** `\\pipe\\samr`  
+**Protocol:** [MS-SAMR]
+
+From `samr.py:1-100`:
+
+```python
+from impacket.dcerpc.v5 import samr, transport
+
+rpctransport = transport.DCERPCTransportFactory(
+    r'ncacn_np:192.168.1.10[\\pipe\\samr]'
+)
+rpctransport.set_credentials('admin', 'password', 'DOMAIN')
+
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(samr.MSRPC_UUID_SAMR)
+
+# Open SAM server
+resp = samr.hSamrConnect(dce)
+serverHandle = resp['ServerHandle']
+
+# Enumerate domains
+resp = samr.hSamrEnumerateDomainsInSamServer(dce, serverHandle)
+for domain in resp['Buffer']['Buffer']:
+    print(f"Domain: {domain['Name']}")
+
+# Open domain
+resp = samr.hSamrLookupDomainInSamServer(dce, serverHandle, 'DOMAIN')
+domainSid = resp['DomainId']
+
+resp = samr.hSamrOpenDomain(dce, serverHandle, domainSid=domainSid)
+domainHandle = resp['DomainHandle']
+
+# Enumerate users
+resp = samr.hSamrEnumerateUsersInDomain(dce, domainHandle)
+for user in resp['Buffer']['Buffer']:
+    print(f"User: {user['Name']} (RID: {user['RelativeId']})")
+
+# Query user information
+resp = samr.hSamrOpenUser(dce, domainHandle, userId=500)  # Administrator
+userHandle = resp['UserHandle']
+
+resp = samr.hSamrQueryInformationUser2(dce, userHandle)
+print(f"Username: {resp['Buffer']['All']['UserName']}")
+print(f"Full Name: {resp['Buffer']['All']['FullName']}")
+
+dce.disconnect()
+```
+
+**Key Functions:**
+- `hSamrConnect()` - Connect to SAM
+- `hSamrEnumerateDomainsInSamServer()` - List domains
+- `hSamrEnumerateUsersInDomain()` - List users
+- `hSamrEnumerateGroupsInDomain()` - List groups
+- `hSamrOpenUser()` - Open user handle
+- `hSamrQueryInformationUser()` - Get user info
+- `hSamrChangePasswordUser()` - Change password
+- `hSamrGetMembersInGroup()` - Get group members
+
+### LSAD - Local Security Authority
+
+**Module:** `impacket.dcerpc.v5.lsad`  
+**UUID:** `12345778-1234-ABCD-EF00-0123456789AB`  
+**Pipe:** `\\pipe\\lsarpc`  
+**Protocol:** [MS-LSAD]
+
+From `lsad.py:1-100`:
+
+```python
+from impacket.dcerpc.v5 import lsad, lsat, transport
+
+rpctransport = transport.DCERPCTransportFactory(
+    r'ncacn_np:192.168.1.10[\\pipe\\lsarpc]'
+)
+rpctransport.set_credentials('admin', 'password', 'DOMAIN')
+
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(lsad.MSRPC_UUID_LSAD)
+
+# Open policy
+resp = lsad.hLsarOpenPolicy2(dce)
+policyHandle = resp['PolicyHandle']
+
+# Query domain information
+resp = lsad.hLsarQueryInformationPolicy2(
+    dce, policyHandle,
+    lsad.POLICY_INFORMATION_CLASS.PolicyAccountDomainInformation
+)
+print(f"Domain: {resp['PolicyInformation']['PolicyAccountDomainInfo']['DomainName']}")
+
+# Lookup SID
+resp = lsat.hLsarLookupNames(dce, policyHandle, ['Administrator'])
+sid = resp['TranslatedSids']['Sids'][0]['Sid']
+print(f"Administrator SID: {sid.formatCanonical()}")
+
+# Lookup name from SID
+resp = lsat.hLsarLookupSids(dce, policyHandle, [sid])
+print(f"Name: {resp['TranslatedNames']['Names'][0]['Name']}")
+
+# Enumerate accounts with privileges
+resp = lsad.hLsarEnumerateAccountsWithUserRight(
+    dce, policyHandle,
+    userRight='SeBackupPrivilege'
+)
+for account in resp['EnumerationBuffer']['Information']:
+    print(f"Account SID: {account['Sid'].formatCanonical()}")
+
+dce.disconnect()
+```
+
+**Key Functions:**
+- `hLsarOpenPolicy()` - Open LSA policy
+- `hLsarQueryInformationPolicy()` - Query policy info
+- `hLsarEnumerateAccounts()` - List accounts
+- `hLsarEnumeratePrivileges()` - List privileges
+- `hLsarLookupNames()` - Name to SID
+- `hLsarLookupSids()` - SID to name
+- `hLsarEnumerateAccountRights()` - Get account rights
+- `hLsarAddAccountRights()` - Add privileges
+
+## Directory Services
+
+### DRSUAPI - Directory Replication Service
+
+**Module:** `impacket.dcerpc.v5.drsuapi`  
+**UUID:** `E3514235-4B06-11D1-AB04-00C04FC2DCD2`  
+**Pipe:** `\\pipe\\drsuapi`  
+**Protocol:** [MS-DRSR]
+
+From `drsuapi.py:1-100`:
+
+```python
+from impacket.dcerpc.v5 import drsuapi, transport
+
+rpctransport = transport.DCERPCTransportFactory(
+    r'ncacn_ip_tcp:192.168.1.10'
+)
+rpctransport.set_credentials('admin', 'password', 'DOMAIN')
+rpctransport.set_kerberos(True, 'dc.domain.com')
+
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(drsuapi.MSRPC_UUID_DRSUAPI)
+
+# Bind to DRS
+request = drsuapi.DRSBind()
+request['puuidClientDsa'] = drsuapi.NTDSAPI_CLIENT_GUID
+drsExtensions = drsuapi.DRS_EXTENSIONS_INT()
+request['pextClient']['cb'] = len(drsExtensions)
+request['pextClient']['rgb'] = list(drsExtensions.getData())
+
+resp = dce.request(request)
+hDrs = resp['phDrs']
+
+# Crack names (convert name formats)
+req = drsuapi.DRSCrackNames()
+req['hDrs'] = hDrs
+req['dwInVersion'] = 1
+req['formatOffered'] = drsuapi.DS_NT4_ACCOUNT_NAME
+req['formatDesired'] = drsuapi.DS_FQDN_1779_NAME
+req['rpNames'] = ['DOMAIN\\\\Administrator']
+
+resp = dce.request(req)
+print(f"DN: {resp['pmsgOut']['V1']['pResult']['rItems'][0]['pName']}")
+
+# Get NC changes (replication)
+req = drsuapi.DRSGetNCChanges()
+req['hDrs'] = hDrs
+# ... configure replication request
+resp = dce.request(req)
+
+dce.disconnect()
+```
+
+**Key Functions:**
+- `DRSBind()` - Bind to DRS
+- `DRSCrackNames()` - Convert name formats
+- `DRSGetNCChanges()` - Replicate objects
+- `DRSDomainControllerInfo()` - Get DC info
+- Used by DCSync attacks to replicate password hashes
+
+## Network Services
+
+### SRVS - Server Service
+
+**Module:** `impacket.dcerpc.v5.srvs`  
+**Pipe:** `\\pipe\\srvsvc`
+
+```python
+from impacket.dcerpc.v5 import srvs, transport
+
+rpctransport = transport.DCERPCTransportFactory(
+    r'ncacn_np:192.168.1.10[\\pipe\\srvsvc]'
+)
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(srvs.MSRPC_UUID_SRVS)
+
+# Enumerate shares
+resp = srvs.hNetrShareEnum(dce, 1)
+for share in resp['InfoStruct']['ShareInfo']['Level1']['Buffer']:
+    print(f"Share: {share['shi1_netname']} - {share['shi1_remark']}")
+
+# Get share info
+resp = srvs.hNetrShareGetInfo(dce, 'C$', 1)
+print(f"Path: {resp['InfoStruct']['ShareInfo1']['shi1_path']}")
+
+# Enumerate sessions
+resp = srvs.hNetrSessionEnum(dce, NULL, NULL, 10)
+for session in resp['InfoStruct']['SessionInfo']['Level10']['Buffer']:
+    print(f"User: {session['sesi10_username']} from {session['sesi10_cname']}")
+
+dce.disconnect()
+```
+
+### WKST - Workstation Service
+
+**Module:** `impacket.dcerpc.v5.wkst`  
+**Pipe:** `\\pipe\\wkssvc`
+
+```python
+from impacket.dcerpc.v5 import wkst, transport
+
+rpctransport = transport.DCERPCTransportFactory(
+    r'ncacn_np:192.168.1.10[\\pipe\\wkssvc]'
+)
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(wkst.MSRPC_UUID_WKST)
+
+# Get workstation info
+resp = wkst.hNetrWkstaGetInfo(dce, 100)
+info = resp['WkstaInfo']['WkstaInfo100']
+print(f"Computer: {info['wki100_computername']}")
+print(f"Domain: {info['wki100_langroup']}")
+print(f"Version: {info['wki100_ver_major']}.{info['wki100_ver_minor']}")
+
+# Get logged on users
+resp = wkst.hNetrWkstaUserEnum(dce, 1)
+for user in resp['UserInfo']['WkstaUserInfo']['Level1']['Buffer']:
+    print(f"User: {user['wkui1_username']}")
+
+dce.disconnect()
+```
+
+## Task Scheduling
+
+### TSCH - Task Scheduler
+
+**Module:** `impacket.dcerpc.v5.tsch`  
+**Pipe:** `\\pipe\\atsvc` (legacy) or dynamic
+
+```python
+from impacket.dcerpc.v5 import tsch, transport
+import xml.etree.ElementTree as ET
+
+rpctransport = transport.DCERPCTransportFactory(
+    r'ncacn_np:192.168.1.10[\\pipe\\atsvc]'
+)
+rpctransport.set_credentials('admin', 'password', 'DOMAIN')
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(tsch.MSRPC_UUID_TSCHS)
+
+# Create task XML
+task_xml = '''<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers>
+    <TimeTrigger>
+      <StartBoundary>2024-01-01T12:00:00</StartBoundary>
+    </TimeTrigger>
+  </Triggers>
+  <Principals>
+    <Principal>
+      <UserId>SYSTEM</UserId>
+    </Principal>
+  </Principals>
+  <Settings>
+    <Enabled>true</Enabled>
+  </Settings>
+  <Actions>
+    <Exec>
+      <Command>cmd.exe</Command>
+      <Arguments>/c echo test</Arguments>
+    </Exec>
+  </Actions>
+</Task>'''
+
+# Register task
+resp = tsch.hSchRpcRegisterTask(
+    dce,
+    '\\\\MyTask',
+    task_xml,
+    tsch.TASK_CREATE,
+    NULL
+)
+
+# Run task
+tsch.hSchRpcRun(dce, '\\\\MyTask')
+
+# Delete task
+tsch.hSchRpcDelete(dce, '\\\\MyTask')
+
+dce.disconnect()
+```
+
+### ATSVC - AT Service (Legacy)
+
+**Module:** `impacket.dcerpc.v5.atsvc`
+
+```python
+from impacket.dcerpc.v5 import atsvc, transport
+import datetime
+
+rpctransport = transport.DCERPCTransportFactory(
+    r'ncacn_np:192.168.1.10[\\pipe\\atsvc]'
+)
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(atsvc.MSRPC_UUID_ATSVC)
+
+# Schedule task
+atInfo = atsvc.AT_INFO()
+atInfo['JobTime'] = (datetime.datetime.now() + datetime.timedelta(minutes=5))
+atInfo['DaysOfMonth'] = 0
+atInfo['DaysOfWeek'] = 0
+atInfo['Flags'] = 0
+atInfo['Command'] = 'cmd.exe /c echo test'
+
+resp = atsvc.hNetrJobAdd(dce, NULL, atInfo)
+jobId = resp['pJobId']
+
+# Enumerate tasks
+resp = atsvc.hNetrJobEnum(dce)
+for job in resp['pEnumContainer']['Buffer']:
+    print(f"Job {job['JobId']}: {job['Command']}")
+
+# Delete task
+atsvc.hNetrJobDel(dce, jobId, jobId)
+
+dce.disconnect()
+```
+
+## Registry Access
+
+### RRP - Windows Registry
+
+**Module:** `impacket.dcerpc.v5.rrp`  
+**Pipe:** `\\pipe\\winreg`
+
+```python
+from impacket.dcerpc.v5 import rrp, transport
+
+rpctransport = transport.DCERPCTransportFactory(
+    r'ncacn_np:192.168.1.10[\\pipe\\winreg]'
+)
+rpctransport.set_credentials('admin', 'password', 'DOMAIN')
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(rrp.MSRPC_UUID_RRP)
+
+# Open registry hive
+resp = rrp.hOpenLocalMachine(dce)
+regHandle = resp['phKey']
+
+# Open key
+resp = rrp.hBaseRegOpenKey(
+    dce, regHandle,
+    'SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion'
+)
+keyHandle = resp['phkResult']
+
+# Enumerate values
+resp = rrp.hBaseRegQueryInfoKey(dce, keyHandle)
+numValues = resp['lpcValues']
+
+for i in range(numValues):
+    resp = rrp.hBaseRegEnumValue(dce, keyHandle, i)
+    print(f"Value: {resp['lpValueNameOut']} = {resp['lpData']}")
+
+# Query specific value
+resp = rrp.hBaseRegQueryValue(dce, keyHandle, 'ProgramFilesDir')
+print(f"Program Files: {resp['lpData']}")
+
+# Create/Set value
+rrp.hBaseRegSetValue(
+    dce, keyHandle,
+    'TestValue',
+    rrp.REG_SZ,
+    'TestData'
+)
+
+rrp.hBaseRegCloseKey(dce, keyHandle)
+rrp.hBaseRegCloseKey(dce, regHandle)
+dce.disconnect()
+```
+
+## Printing
+
+### RPRN - Print System
+
+**Module:** `impacket.dcerpc.v5.rprn`  
+**Pipe:** `\\pipe\\spoolss`
+
+```python
+from impacket.dcerpc.v5 import rprn, transport
+
+rpctransport = transport.DCERPCTransportFactory(
+    r'ncacn_np:192.168.1.10[\\pipe\\spoolss]'
+)
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(rprn.MSRPC_UUID_RPRN)
+
+# Enumerate printers
+resp = rprn.hRpcEnumPrinters(
+    dce,
+    rprn.PRINTER_ENUM_LOCAL | rprn.PRINTER_ENUM_CONNECTIONS,
+    NULL, 1
+)
+for printer in resp['pPrinterEnum']:
+    print(f"Printer: {printer['pName']}")
+
+# Open printer
+resp = rprn.hRpcOpenPrinter(dce, '\\\\\\\\SERVER\\\\PrinterName')
+printerHandle = resp['pHandle']
+
+# Get printer info
+resp = rprn.hRpcGetPrinter(dce, printerHandle, 2)
+print(f"Driver: {resp['pPrinter']['pDriverName']}")
+print(f"Port: {resp['pPrinter']['pPortName']}")
+
+rprn.hRpcClosePrinter(dce, printerHandle)
+dce.disconnect()
+```
+
+## Endpoint Mapper
+
+### EPM - Endpoint Mapper
+
+**Module:** `impacket.dcerpc.v5.epm`  
+**UUID:** `E1AF8308-5D1F-11C9-91A4-08002B14A0FA`  
+**Port:** TCP 135
+
+```python
+from impacket.dcerpc.v5 import epm, transport
+
+rpctransport = transport.DCERPCTransportFactory(
+    'ncacn_ip_tcp:192.168.1.10[135]'
+)
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(epm.MSRPC_UUID_PORTMAP)
+
+# Lookup endpoint for interface
+resp = epm.hept_lookup(
+    dce,
+    inquiry_type=epm.RPC_C_EP_ALL_ELTS,
+    ifId=drsuapi.MSRPC_UUID_DRSUAPI
+)
+
+for entry in resp:
+    binding = epm.PrintStringBinding(entry['tower']['Floors'])
+    print(f"Endpoint: {binding}")
+
+# Map interface UUID to endpoint
+string_binding = epm.hept_map(
+    '192.168.1.10',
+    drsuapi.MSRPC_UUID_DRSUAPI
+)
+print(f"Binding: {string_binding}")
+
+dce.disconnect()
+```
+
+## Netlogon
+
+### NRPC - Netlogon Remote Protocol
+
+**Module:** `impacket.dcerpc.v5.nrpc`  
+**Pipe:** `\\pipe\\netlogon`
+
+```python
+from impacket.dcerpc.v5 import nrpc, transport
+
+rpctransport = transport.DCERPCTransportFactory(
+    r'ncacn_np:192.168.1.10[\\pipe\\netlogon]'
+)
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(nrpc.MSRPC_UUID_NRPC)
+
+# Get domain information
+resp = nrpc.hDsrGetDcNameEx(
+    dce,
+    NULL,
+    'DOMAIN.COM',
+    NULL, NULL,
+    nrpc.DS_DIRECTORY_SERVICE_REQUIRED
+)
+print(f"DC: {resp['DomainControllerInfo']['DomainControllerName']}")
+print(f"DC IP: {resp['DomainControllerInfo']['DomainControllerAddress']}")
+
+# Get trust information
+resp = nrpc.hDsrEnumerateDomainTrusts(dce, 'DC01', 1)
+for trust in resp['Domains']['Domains']:
+    print(f"Trust: {trust['NetbiosDomainName']} ({trust['DnsDomainName']})")
+
+dce.disconnect()
+```
+
+## Event Log
+
+### EVEN - Event Log (Legacy)
+
+**Module:** `impacket.dcerpc.v5.even`  
+**Pipe:** `\\pipe\\eventlog`
+
+### EVEN6 - Event Log (Vista+)
+
+**Module:** `impacket.dcerpc.v5.even6`  
+**Pipe:** Dynamic
+
+```python
+from impacket.dcerpc.v5 import even6, transport
+
+rpctransport = transport.DCERPCTransportFactory(
+    r'ncacn_np:192.168.1.10[\\pipe\\eventlog]'
+)
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(even6.MSRPC_UUID_EVEN6)
+
+# Open event log
+resp = even6.hEvtRpcOpenLogHandle(
+    dce,
+    'System',  # Channel name
+    even6.EvtRpcChannelPath
+)
+logHandle = resp['Handle']
+
+# Query events
+flags = even6.EvtQueryChannelPath | even6.EvtQueryForwardDirection
+resp = even6.hEvtRpcQueryNext(
+    dce, logHandle,
+    10,  # Number of events
+    0, flags
+)
+
+for event in resp['EventDataBuffer']:
+    print(f"Event: {event}")
+
+even6.hEvtRpcClose(dce, logHandle)
+dce.disconnect()
+```
+
+## Additional Interfaces
+
+| Module | Protocol | Description |
+|--------|----------|-------------|
+| `bkrp` | [MS-BKRP] | BackupKey Remote Protocol |
+| `dhcpm` | [MS-DHCPM] | DHCP Server Management |
+| `dcomrt` | [MS-DCOM] | DCOM Runtime |
+| `gkdi` | [MS-GKDI] | Group Key Distribution |
+| `icpr` | [MS-ICPR] | Certificate Services |
+| `iphlp` | | IP Helper (removed in newer versions) |
+| `lsat` | [MS-LSAT] | LSA Translation Methods |
+| `mgmt` | [C706] | RPC Management |
+| `mimilib` | | Mimikatz Library Interface |
+| `nspi` | [MS-NSPI] | Name Service Provider Interface |
+| `oaut` | [MS-OAUT] | OLE Automation |
+| `oxabref` | [MS-OXABREF] | Address Book Name Service Provider |
+| `par` | [MS-PAR] | Print System Asynchronous Remote Protocol |
+| `sasec` | [MS-TSTS] | Terminal Services Session Broker |
+
+## Common Patterns
+
+### Interface Discovery
+
+```python
+from impacket.dcerpc.v5 import transport, epm
+
+# Query endpoint mapper for available interfaces
+rpctransport = transport.DCERPCTransportFactory('ncacn_ip_tcp:192.168.1.10')
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(epm.MSRPC_UUID_PORTMAP)
+
+resp = epm.hept_lookup(dce)
+for entry in resp:
+    uuid = entry['tower']['Floors'][0]
+    binding = epm.PrintStringBinding(entry['tower']['Floors'])
+    print(f"UUID: {uuid}")
+    print(f"Binding: {binding}")
+```
+
+### Error Handling
+
+```python
+from impacket.dcerpc.v5 import scmr
+from impacket.dcerpc.v5.rpcrt import DCERPCException
+from impacket import system_errors
+
+try:
+    resp = scmr.hROpenServiceW(dce, scHandle, 'NonExistentService')
+except scmr.DCERPCSessionError as e:
+    if e.get_error_code() == system_errors.ERROR_SERVICE_DOES_NOT_EXIST:
+        print("Service not found")
+    else:
+        print(f"Error: {e}")
+except DCERPCException as e:
+    print(f"RPC Error: {e}")
+```
+
+## See Also
+
+- [DCE/RPC Overview](/api/dcerpc/overview)
+- [Transport Layer](/api/dcerpc/transport)
+- [DCOM/WMI](/api/dcerpc/dcom)

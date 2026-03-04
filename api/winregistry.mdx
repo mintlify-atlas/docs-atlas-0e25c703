@@ -1,0 +1,534 @@
+---
+title: 'Windows Registry'
+description: 'Windows Registry hive parser'
+---
+
+## Overview
+
+The `winregistry` module provides parsers for Windows Registry hives in both binary (saveRegistryParser) and exported text (exportRegistryParser) formats.
+
+## Factory Function
+
+### get_registry_parser()
+
+Automatically detect and return the appropriate registry parser.
+
+```python
+from impacket.winregistry import get_registry_parser
+
+# Auto-detect format
+reg = get_registry_parser('SYSTEM')
+reg = get_registry_parser('registry_export.reg')
+reg = get_registry_parser(remote_file_object, isRemote=True)
+```
+
+#### Parameters
+
+- **hive** (str/file): Path to registry file or file-like object
+- **isRemote** (bool): Whether the file is remote (default: False)
+
+#### Returns
+
+`saveRegistryParser` or `exportRegistryParser` instance
+
+## Binary Registry Parser
+
+### saveRegistryParser
+
+Parser for binary registry hive files (SYSTEM, SAM, SECURITY, SOFTWARE, etc.).
+
+```python
+from impacket.winregistry import saveRegistryParser
+
+reg = saveRegistryParser('SYSTEM', isRemote=False)
+```
+
+### Finding Keys
+
+#### findKey()
+
+Find a registry key by path.
+
+```python
+key = reg.findKey('\\ControlSet001\\Control\\Lsa')
+
+if key:
+    print(f"Key found: {key['KeyName'].decode('utf-8')}")
+    print(f"Subkeys: {key['NumSubKeys']}")
+    print(f"Values: {key['NumValues']}")
+else:
+    print("Key not found")
+```
+
+#### Parameters
+
+- **key** (str): Registry key path (use `\\` as separator)
+
+#### Returns
+
+REG_NK structure or None if not found
+
+### Enumerating Keys
+
+#### enumKey()
+
+List all subkeys of a key.
+
+```python
+key = reg.findKey('\\ControlSet001\\Services')
+
+if key:
+    subkeys = reg.enumKey(key)
+    for subkey in subkeys:
+        print(f"Subkey: {subkey}")
+```
+
+#### Parameters
+
+- **parentKey** (REG_NK): Parent key structure
+
+#### Returns
+
+List of subkey names (strings)
+
+### Reading Values
+
+#### getValue()
+
+Get a registry value.
+
+```python
+# Method 1: Full path
+result = reg.getValue('\\ControlSet001\\Control\\Lsa\\SecureBoot')
+
+# Method 2: Key path + value name  
+result = reg.getValue(
+    '\\ControlSet001\\Control\\Lsa',
+    valueName='SecureBoot'
+)
+
+if result:
+    value_type, value_data = result
+    print(f"Type: {value_type}")
+    print(f"Data: {value_data}")
+```
+
+#### Parameters
+
+- **keyValue** (str): Full path to value or path to key
+- **valueName** (str): Value name if keyValue is key path (optional)
+
+#### Returns
+
+Tuple of (ValueType, ValueData) or None
+
+### Writing Values
+
+#### setValue()
+
+Modify a registry value (in-memory only).
+
+```python
+# Read current value
+value_type, value_data = reg.getValue('\\Path\\To\\Value')
+
+# Modify
+new_data = b'\x01\x00\x00\x00'  # Must be same length
+bytes_written = reg.setValue('\\Path\\To\\Value', new_data)
+
+print(f"Wrote {bytes_written} bytes")
+```
+
+#### Parameters
+
+- **keyValue** (str): Full path to the value
+- **valueData** (bytes): New value data
+
+#### Returns
+
+Tuple of (ValueType, BytesWritten) or None
+
+**Note**: Length must match existing value. Writing different lengths is not implemented.
+
+### Enumerating Values
+
+#### enumValues()
+
+List all values in a key.
+
+```python
+key = reg.findKey('\\ControlSet001\\Control\\Lsa')
+
+if key:
+    values = reg.enumValues(key)
+    for value_name in values:
+        print(f"Value: {value_name.decode('utf-8')}")
+```
+
+#### Parameters
+
+- **key** (REG_NK): Key structure
+
+#### Returns
+
+List of value names (bytes)
+
+### Walking the Registry
+
+#### walk()
+
+Recursively walk and print all subkeys.
+
+```python
+reg.walk('\\ControlSet001\\Services')
+
+# Output:
+# service1
+#   Parameters
+#   Enum
+# service2
+#   ...
+```
+
+#### Parameters
+
+- **parentKey** (str): Starting key path
+
+### Getting Class Data
+
+#### getClass()
+
+Retrieve class name data for a key.
+
+```python
+class_data = reg.getClass('\\ControlSet001')
+if class_data:
+    print(f"Class data: {class_data.hex()}")
+```
+
+## Registry Value Types
+
+### Constants
+
+```python
+from impacket.winregistry import (
+    REG_NONE,        # 0x00 - No type
+    REG_SZ,          # 0x01 - String
+    REG_EXPAND_SZ,   # 0x02 - Expandable string
+    REG_BINARY,      # 0x03 - Binary data
+    REG_DWORD,       # 0x04 - 32-bit integer
+    REG_MULTISZ,     # 0x07 - Multi-string
+    REG_QWORD,       # 0x0b - 64-bit integer
+)
+```
+
+### printValue()
+
+Format and print a registry value.
+
+```python
+result = reg.getValue('\\Path\\To\\Value')
+if result:
+    value_type, value_data = result
+    reg.printValue(value_type, value_data)
+
+# Outputs formatted based on type:
+# REG_SZ: "String value"
+# REG_DWORD: 12345
+# REG_BINARY: <hexdump>
+```
+
+## Export Registry Parser
+
+### exportRegistryParser
+
+Parser for exported registry files (.reg format).
+
+```python
+from impacket.winregistry import exportRegistryParser
+
+reg = exportRegistryParser('export.reg')
+```
+
+### Usage
+
+The export parser provides the same interface as the binary parser:
+
+```python
+# Find keys
+key = reg.findKey('HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet')
+
+# Enumerate subkeys
+subkeys = reg.enumKey(key_path)
+
+# Get values
+result = reg.getValue(key_path, 'ValueName')
+
+# Walk registry
+reg.walk('HKEY_LOCAL_MACHINE\\SOFTWARE')
+```
+
+**Note**: Export format requires the full registry path including the root key (e.g., `HKEY_LOCAL_MACHINE\\...`).
+
+## Complete Examples
+
+### Extract SAM Hashes
+
+```python
+from impacket.winregistry import saveRegistryParser
+from struct import unpack
+import hashlib
+
+# Open SYSTEM hive to get boot key
+system_reg = saveRegistryParser('SYSTEM')
+
+# Get current control set
+result = system_reg.getValue('\\Select\\Current')
+current_set = unpack('<L', result[1])[0]
+
+# Get boot key from JD, Skew1, GBG, Data keys
+key_parts = []
+for key_name in ['JD', 'Skew1', 'GBG', 'Data']:
+    key_path = f'\\ControlSet{current_set:03d}\\Control\\Lsa\\{key_name}'
+    key = system_reg.findKey(key_path)
+    if key:
+        class_data = system_reg.getClass(key_path)
+        key_parts.append(class_data)
+
+boot_key_str = b''.join(key_parts).decode('utf-16le')
+boot_key = bytes.fromhex(boot_key_str)
+
+print(f"Boot Key: {boot_key.hex()}")
+
+# Open SAM hive
+sam_reg = saveRegistryParser('SAM')
+
+# Get F value for account domain
+result = sam_reg.getValue('\\SAM\\Domains\\Account\\F')
+if result:
+    f_value = result[1]
+    # Parse F value to get encryption key
+    # ... (additional parsing required)
+
+system_reg.close()
+sam_reg.close()
+```
+
+### Query Service Configuration
+
+```python
+from impacket.winregistry import get_registry_parser
+
+reg = get_registry_parser('SYSTEM')
+
+# Find current control set
+result = reg.getValue('\\Select\\Current')
+if result:
+    current = unpack('<L', result[1])[0]
+    services_path = f'\\ControlSet{current:03d}\\Services'
+    
+    services_key = reg.findKey(services_path)
+    if services_key:
+        # Enumerate all services
+        services = reg.enumKey(services_key)
+        
+        for service in services:
+            service_path = f'{services_path}\\{service}'
+            
+            # Get start type
+            start_result = reg.getValue(service_path, 'Start')
+            if start_result:
+                start_type = unpack('<L', start_result[1])[0]
+                start_names = {
+                    0: 'Boot',
+                    1: 'System', 
+                    2: 'Automatic',
+                    3: 'Manual',
+                    4: 'Disabled'
+                }
+                
+                print(f"{service}: {start_names.get(start_type, 'Unknown')}")
+
+reg.close()
+```
+
+### Extract Network Interfaces
+
+```python
+from impacket.winregistry import saveRegistryParser
+
+reg = saveRegistryParser('SYSTEM')
+
+# Get current control set
+result = reg.getValue('\\Select\\Current')
+current = unpack('<L', result[1])[0]
+
+interfaces_path = f'\\ControlSet{current:03d}\\Services\\Tcpip\\Parameters\\Interfaces'
+interfaces_key = reg.findKey(interfaces_path)
+
+if interfaces_key:
+    interfaces = reg.enumKey(interfaces_key)
+    
+    for interface_guid in interfaces:
+        interface_path = f'{interfaces_path}\\{interface_guid}'
+        
+        # Get DHCP status
+        dhcp_result = reg.getValue(interface_path, 'EnableDHCP')
+        if dhcp_result:
+            dhcp_enabled = unpack('<L', dhcp_result[1])[0]
+            
+            print(f"\nInterface: {interface_guid}")
+            print(f"DHCP: {'Enabled' if dhcp_enabled else 'Disabled'}")
+            
+            if dhcp_enabled:
+                # Get DHCP address
+                ip_result = reg.getValue(interface_path, 'DhcpIPAddress')
+                if ip_result:
+                    ip = ip_result[1].decode('utf-16le').rstrip('\x00')
+                    print(f"IP: {ip}")
+            else:
+                # Get static address
+                ip_result = reg.getValue(interface_path, 'IPAddress')
+                if ip_result:
+                    ip = ip_result[1].decode('utf-16le').rstrip('\x00')
+                    print(f"IP: {ip}")
+
+reg.close()
+```
+
+### Modify Registry Value
+
+```python
+from impacket.winregistry import saveRegistryParser
+
+reg = saveRegistryParser('SYSTEM', isRemote=False)
+
+# Read current value
+key_path = '\\ControlSet001\\Control\\TimeZoneInformation\\RealTimeIsUniversal'
+result = reg.getValue(key_path)
+
+if result:
+    value_type, value_data = result
+    print(f"Current value: {value_data.hex()}")
+    
+    # Modify (must be same length)
+    new_value = b'\x01\x00\x00\x00'  # Enable
+    if len(new_value) == len(value_data):
+        reg.setValue(key_path, new_value)
+        print("Value updated")
+        
+        # Verify
+        verify = reg.getValue(key_path)
+        print(f"New value: {verify[1].hex()}")
+
+reg.close()
+```
+
+### Search for Values
+
+```python
+from impacket.winregistry import saveRegistryParser
+
+def search_values(reg, key_path, search_term):
+    """Search for values containing search_term."""
+    key = reg.findKey(key_path)
+    if not key:
+        return
+    
+    # Check values in current key
+    values = reg.enumValues(key)
+    for value_name in values:
+        result = reg.getValue(key_path, value_name.decode('utf-8'))
+        if result:
+            value_type, value_data = result
+            if value_type in [REG_SZ, REG_EXPAND_SZ]:
+                value_str = value_data.decode('utf-16le', errors='ignore')
+                if search_term.lower() in value_str.lower():
+                    print(f"Found in {key_path}\\{value_name.decode('utf-8')}")
+                    print(f"  Value: {value_str}")
+    
+    # Recurse into subkeys
+    subkeys = reg.enumKey(key)
+    for subkey in subkeys:
+        subkey_path = f"{key_path}\\{subkey}"
+        search_values(reg, subkey_path, search_term)
+
+reg = saveRegistryParser('SOFTWARE')
+search_values(reg, '\\Microsoft\\Windows\\CurrentVersion', 'ProgramFiles')
+reg.close()
+```
+
+## Registry Structure Classes
+
+### REG_NK (Named Key)
+
+Key structure with subkeys and values.
+
+```python
+key['KeyName']           # Key name (bytes)
+key['NumSubKeys']        # Number of subkeys
+key['NumValues']         # Number of values
+key['OffsetSubKeyLf']    # Offset to subkey list
+key['OffsetValueList']   # Offset to value list
+```
+
+### REG_VK (Value Key)
+
+Value structure.
+
+```python
+value['Name']         # Value name (bytes)
+value['ValueType']    # Type (REG_SZ, REG_DWORD, etc.)
+value['DataLen']      # Data length
+value['OffsetData']   # Offset to data
+```
+
+## Performance Tips
+
+1. **Cache keys** - Store frequently accessed key structures
+2. **Use enumeration** - More efficient than repeated findKey calls
+3. **Close files** - Always close registry files when done
+4. **Remote access** - Use `isRemote=True` for remote file objects
+5. **Batch operations** - Group related operations together
+
+## Limitations
+
+- **Write support limited** - Can only modify existing values of same length
+- **No creation** - Cannot create new keys or values
+- **No deletion** - Cannot delete keys or values  
+- **Transaction logs** - Does not process transaction logs
+- **Hive recovery** - Limited support for damaged hives
+
+## Common Registry Hives
+
+### SYSTEM
+- Hardware configuration
+- Services
+- Network settings
+- Boot configuration
+
+### SAM
+- Local user accounts
+- Password hashes
+- Group memberships
+
+### SECURITY  
+- Security policies
+- LSA secrets
+- Cached credentials
+
+### SOFTWARE
+- Installed applications
+- Windows settings
+- File associations
+
+### NTUSER.DAT
+- Per-user settings
+- Desktop configuration
+- Application preferences
+
+## References
+
+- [Windows Registry Format](http://sentinelchicken.com/data/TheWindowsNTRegistryFileFormat.pdf)
+- [Registry Structure](https://docs.microsoft.com/en-us/windows/win32/sysinfo/registry-element-size-limits)
+- [Hive Files](https://docs.microsoft.com/en-us/windows/win32/sysinfo/registry-hives)

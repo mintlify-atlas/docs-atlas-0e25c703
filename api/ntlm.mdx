@@ -1,0 +1,821 @@
+---
+title: 'NTLM'
+description: 'NTLM authentication protocol implementation and cryptographic helpers'
+---
+
+## Overview
+
+The `ntlm` module provides a complete implementation of the NT LAN Manager (NTLM) authentication protocol, including NTLMv1, NTLMv2, and NTLM2 Session Security. It handles challenge-response authentication, hash generation, and session key derivation.
+
+## Key Functions
+
+### getNTLMSSPType1()
+
+Create an NTLM Type 1 (Negotiate) message.
+
+```python
+from impacket import ntlm
+
+type1 = ntlm.getNTLMSSPType1(workstation='CLIENT', domain='CORP',
+                              signingRequired=False, use_ntlmv2=True)
+```
+
+<ParamField path="workstation" type="str" default="''">
+  Workstation name to send in negotiate message
+</ParamField>
+
+<ParamField path="domain" type="str" default="''">
+  Domain name to send
+</ParamField>
+
+<ParamField path="signingRequired" type="bool" default="False">
+  Whether message signing is required
+</ParamField>
+
+<ParamField path="use_ntlmv2" type="bool" default="True">
+  Use NTLMv2 protocol (recommended)
+</ParamField>
+
+<ParamField path="version" type="VERSION">
+  OS version structure to include
+</ParamField>
+
+<ResponseField name="return" type="NTLMAuthNegotiate">
+  Type 1 message object
+</ResponseField>
+
+### getNTLMSSPType3()
+
+Create an NTLM Type 3 (Authenticate) message.
+
+```python
+type3, session_key = ntlm.getNTLMSSPType3(
+    type1, type2, user, password, domain,
+    lmhash='', nthash='', use_ntlmv2=True
+)
+```
+
+<ParamField path="type1" type="NTLMAuthNegotiate" required>
+  Type 1 message from `getNTLMSSPType1()`
+</ParamField>
+
+<ParamField path="type2" type="bytes" required>
+  Type 2 (Challenge) message from server
+</ParamField>
+
+<ParamField path="user" type="str" required>
+  Username for authentication
+</ParamField>
+
+<ParamField path="password" type="str" required>
+  Password (not used if hashes provided)
+</ParamField>
+
+<ParamField path="domain" type="str" required>
+  Domain name
+</ParamField>
+
+<ParamField path="lmhash" type="str" default="''">
+  LM hash (hex string)
+</ParamField>
+
+<ParamField path="nthash" type="str" default="''">
+  NT hash (hex string)
+</ParamField>
+
+<ParamField path="use_ntlmv2" type="bool" default="True">
+  Use NTLMv2 (recommended)
+</ParamField>
+
+<ParamField path="channel_binding_value" type="bytes" default="b''">
+  Channel binding data for EPA (Extended Protection for Authentication)
+</ParamField>
+
+<ParamField path="service" type="str" default="'cifs'">
+  Service principal name (e.g., 'cifs', 'http', 'ldap')
+</ParamField>
+
+<ResponseField name="type3" type="NTLMAuthChallengeResponse">
+  Type 3 authenticate message
+</ResponseField>
+
+<ResponseField name="session_key" type="bytes">
+  Session key for signing/encryption
+</ResponseField>
+
+## Hash Computation
+
+### compute_lmhash()
+
+Compute LM hash from password.
+
+```python
+from impacket.ntlm import compute_lmhash
+
+lmhash = compute_lmhash('Password123')
+```
+
+<ParamField path="password" type="str" required>
+  Password to hash (only Latin-1 characters supported)
+</ParamField>
+
+<ResponseField name="return" type="bytes">
+  16-byte LM hash
+</ResponseField>
+
+<Note>
+  If password contains non-Latin-1 characters, returns the default empty LM hash.
+</Note>
+
+### compute_nthash()
+
+Compute NT hash from password.
+
+```python
+from impacket.ntlm import compute_nthash
+
+nthash = compute_nthash('Password123')
+```
+
+<ParamField path="password" type="str" required>
+  Password to hash (Unicode supported)
+</ParamField>
+
+<ResponseField name="return" type="bytes">
+  16-byte NT hash (MD4 of Unicode password)
+</ResponseField>
+
+## Response Computation
+
+### computeResponse()
+
+Compute NTLM challenge response.
+
+```python
+ntResponse, lmResponse, sessionKey = ntlm.computeResponse(
+    flags, serverChallenge, clientChallenge, serverName,
+    domain, user, password, lmhash='', nthash='',
+    use_ntlmv2=True
+)
+```
+
+<ParamField path="flags" type="int" required>
+  NTLM negotiation flags
+</ParamField>
+
+<ParamField path="serverChallenge" type="bytes" required>
+  8-byte challenge from server
+</ParamField>
+
+<ParamField path="clientChallenge" type="bytes" required>
+  8-byte client challenge
+</ParamField>
+
+<ParamField path="serverName" type="bytes" required>
+  Target information from Type 2 message
+</ParamField>
+
+<ParamField path="domain" type="str" required>
+  Domain name
+</ParamField>
+
+<ParamField path="user" type="str" required>
+  Username
+</ParamField>
+
+<ParamField path="password" type="str" required>
+  Password
+</ParamField>
+
+<ParamField path="lmhash" type="str" default="''">
+  Pre-computed LM hash
+</ParamField>
+
+<ParamField path="nthash" type="str" default="''">
+  Pre-computed NT hash
+</ParamField>
+
+<ParamField path="use_ntlmv2" type="bool" default="True">
+  Use NTLMv2 protocol
+</ParamField>
+
+<ResponseField name="ntResponse" type="bytes">
+  NT response
+</ResponseField>
+
+<ResponseField name="lmResponse" type="bytes">
+  LM response
+</ResponseField>
+
+<ResponseField name="sessionKey" type="bytes">
+  Base session key
+</ResponseField>
+
+## Signing and Sealing
+
+### SIGN()
+
+Sign a message.
+
+```python
+signature = ntlm.SIGN(flags, signingKey, message, seqNum, handle)
+```
+
+<ParamField path="flags" type="int" required>
+  NTLM flags
+</ParamField>
+
+<ParamField path="signingKey" type="bytes" required>
+  Signing key from `SIGNKEY()`
+</ParamField>
+
+<ParamField path="message" type="bytes" required>
+  Message to sign
+</ParamField>
+
+<ParamField path="seqNum" type="int" required>
+  Sequence number
+</ParamField>
+
+<ParamField path="handle" type="callable" required>
+  RC4 cipher function
+</ParamField>
+
+<ResponseField name="return" type="NTLMMessageSignature">
+  Message signature
+</ResponseField>
+
+### SEAL()
+
+Encrypt and sign a message.
+
+```python
+sealedMsg, signature = ntlm.SEAL(
+    flags, signingKey, sealingKey,
+    messageToSign, messageToEncrypt,
+    seqNum, handle
+)
+```
+
+<ParamField path="flags" type="int" required>
+  NTLM flags
+</ParamField>
+
+<ParamField path="signingKey" type="bytes" required>
+  Signing key
+</ParamField>
+
+<ParamField path="sealingKey" type="bytes" required>
+  Sealing (encryption) key
+</ParamField>
+
+<ParamField path="messageToSign" type="bytes" required>
+  Message data for signature
+</ParamField>
+
+<ParamField path="messageToEncrypt" type="bytes" required>
+  Message data to encrypt
+</ParamField>
+
+<ParamField path="seqNum" type="int" required>
+  Sequence number
+</ParamField>
+
+<ParamField path="handle" type="callable" required>
+  RC4 cipher function
+</ParamField>
+
+<ResponseField name="sealedMsg" type="bytes">
+  Encrypted message
+</ResponseField>
+
+<ResponseField name="signature" type="NTLMMessageSignature">
+  Message signature
+</ResponseField>
+
+### SIGNKEY()
+
+Derive signing key from session key.
+
+```python
+signKey = ntlm.SIGNKEY(flags, randomSessionKey, mode='Client')
+```
+
+<ParamField path="flags" type="int" required>
+  NTLM flags
+</ParamField>
+
+<ParamField path="randomSessionKey" type="bytes" required>
+  Random session key
+</ParamField>
+
+<ParamField path="mode" type="str" default="'Client'">
+  Direction: `'Client'` or `'Server'`
+</ParamField>
+
+<ResponseField name="return" type="bytes">
+  Signing key
+</ResponseField>
+
+### SEALKEY()
+
+Derive sealing (encryption) key from session key.
+
+```python
+sealKey = ntlm.SEALKEY(flags, randomSessionKey, mode='Client')
+```
+
+<ParamField path="flags" type="int" required>
+  NTLM flags
+</ParamField>
+
+<ParamField path="randomSessionKey" type="bytes" required>
+  Random session key
+</ParamField>
+
+<ParamField path="mode" type="str" default="'Client'">
+  Direction: `'Client'` or `'Server'`
+</ParamField>
+
+<ResponseField name="return" type="bytes">
+  Sealing key (encryption key)
+</ResponseField>
+
+## Classes
+
+### NTLMAuthNegotiate
+
+NTLM Type 1 (Negotiate) message.
+
+```python
+auth = ntlm.NTLMAuthNegotiate()
+auth['flags'] = ntlm.NTLMSSP_NEGOTIATE_UNICODE | \
+                ntlm.NTLMSSP_NEGOTIATE_NTLM
+data = auth.getData()
+```
+
+<ResponseField name="flags" type="int">
+  Negotiation flags
+</ResponseField>
+
+<ResponseField name="domain_name" type="bytes">
+  Domain name
+</ResponseField>
+
+<ResponseField name="host_name" type="bytes">
+  Workstation name
+</ResponseField>
+
+<ResponseField name="os_version" type="VERSION">
+  OS version structure
+</ResponseField>
+
+### NTLMAuthChallenge
+
+NTLM Type 2 (Challenge) message.
+
+```python
+challenge = ntlm.NTLMAuthChallenge(data)
+server_challenge = challenge['challenge']
+target_info = challenge['TargetInfoFields']
+```
+
+<ResponseField name="challenge" type="bytes">
+  8-byte server challenge
+</ResponseField>
+
+<ResponseField name="TargetInfoFields" type="bytes">
+  AV_PAIRS structure with server information
+</ResponseField>
+
+<ResponseField name="flags" type="int">
+  Server's negotiation flags
+</ResponseField>
+
+<ResponseField name="domain_name" type="bytes">
+  Target domain
+</ResponseField>
+
+### NTLMAuthChallengeResponse
+
+NTLM Type 3 (Authenticate) message.
+
+```python
+response = ntlm.NTLMAuthChallengeResponse(
+    username='admin',
+    password='password',
+    challenge=server_challenge
+)
+
+data = response.getData()
+```
+
+<ResponseField name="ntlm" type="bytes">
+  NT response
+</ResponseField>
+
+<ResponseField name="lanman" type="bytes">
+  LM response
+</ResponseField>
+
+<ResponseField name="user_name" type="bytes">
+  Username (UTF-16LE)
+</ResponseField>
+
+<ResponseField name="domain_name" type="bytes">
+  Domain name (UTF-16LE)
+</ResponseField>
+
+<ResponseField name="host_name" type="bytes">
+  Workstation name (UTF-16LE)
+</ResponseField>
+
+<ResponseField name="session_key" type="bytes">
+  Encrypted random session key
+</ResponseField>
+
+<ResponseField name="flags" type="int">
+  Negotiation flags
+</ResponseField>
+
+### AV_PAIRS
+
+Attribute-Value pairs for target information.
+
+```python
+av_pairs = ntlm.AV_PAIRS(targetInfo)
+
+# Access fields
+hostname = av_pairs[ntlm.NTLMSSP_AV_HOSTNAME]
+dns_name = av_pairs[ntlm.NTLMSSP_AV_DNS_HOSTNAME]
+
+# Set fields
+av_pairs[ntlm.NTLMSSP_AV_TARGET_NAME] = b'cifs/server'
+
+# Get serialized data
+data = av_pairs.getData()
+```
+
+<ResponseField name="NTLMSSP_AV_HOSTNAME" type="bytes">
+  Server hostname
+</ResponseField>
+
+<ResponseField name="NTLMSSP_AV_DOMAINNAME" type="bytes">
+  Domain name
+</ResponseField>
+
+<ResponseField name="NTLMSSP_AV_DNS_HOSTNAME" type="bytes">
+  DNS hostname
+</ResponseField>
+
+<ResponseField name="NTLMSSP_AV_DNS_DOMAINNAME" type="bytes">
+  DNS domain name
+</ResponseField>
+
+<ResponseField name="NTLMSSP_AV_TIME" type="bytes">
+  Timestamp
+</ResponseField>
+
+<ResponseField name="NTLMSSP_AV_TARGET_NAME" type="bytes">
+  Target SPN
+</ResponseField>
+
+<ResponseField name="NTLMSSP_AV_CHANNEL_BINDINGS" type="bytes">
+  Channel binding data
+</ResponseField>
+
+## Constants
+
+### NTLM Flags
+
+```python
+# Negotiation flags
+NTLMSSP_NEGOTIATE_UNICODE = 0x00000001
+NTLMSSP_NEGOTIATE_OEM = 0x00000002
+NTLMSSP_REQUEST_TARGET = 0x00000004
+NTLMSSP_NEGOTIATE_SIGN = 0x00000010
+NTLMSSP_NEGOTIATE_SEAL = 0x00000020
+NTLMSSP_NEGOTIATE_DATAGRAM = 0x00000040
+NTLMSSP_NEGOTIATE_LM_KEY = 0x00000080
+NTLMSSP_NEGOTIATE_NTLM = 0x00000200
+NTLMSSP_NEGOTIATE_ANONYMOUS = 0x00000800
+NTLMSSP_NEGOTIATE_OEM_DOMAIN_SUPPLIED = 0x00001000
+NTLMSSP_NEGOTIATE_OEM_WORKSTATION_SUPPLIED = 0x00002000
+NTLMSSP_NEGOTIATE_ALWAYS_SIGN = 0x00008000
+NTLMSSP_TARGET_TYPE_DOMAIN = 0x00010000
+NTLMSSP_TARGET_TYPE_SERVER = 0x00020000
+NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY = 0x00080000
+NTLMSSP_NEGOTIATE_IDENTIFY = 0x00100000
+NTLMSSP_NEGOTIATE_TARGET_INFO = 0x00800000
+NTLMSSP_NEGOTIATE_VERSION = 0x02000000
+NTLMSSP_NEGOTIATE_128 = 0x20000000
+NTLMSSP_NEGOTIATE_KEY_EXCH = 0x40000000
+NTLMSSP_NEGOTIATE_56 = 0x80000000
+```
+
+### AV Pair Types
+
+```python
+NTLMSSP_AV_EOL = 0x00              # End of list
+NTLMSSP_AV_HOSTNAME = 0x01         # Server hostname
+NTLMSSP_AV_DOMAINNAME = 0x02       # Domain name
+NTLMSSP_AV_DNS_HOSTNAME = 0x03     # DNS hostname
+NTLMSSP_AV_DNS_DOMAINNAME = 0x04   # DNS domain
+NTLMSSP_AV_DNS_TREENAME = 0x05     # DNS tree name
+NTLMSSP_AV_FLAGS = 0x06            # Flags
+NTLMSSP_AV_TIME = 0x07             # Timestamp
+NTLMSSP_AV_RESTRICTIONS = 0x08     # Restrictions
+NTLMSSP_AV_TARGET_NAME = 0x09      # Target SPN
+NTLMSSP_AV_CHANNEL_BINDINGS = 0x0a # Channel bindings
+```
+
+### Global Settings
+
+```python
+# Set globally to control NTLMv2 usage
+ntlm.USE_NTLMv2 = True   # Recommended
+
+# Default LM hash (empty password)
+ntlm.DEFAULT_LM_HASH = b'\xaa\xd3\xb4...'
+```
+
+## Usage Examples
+
+### Basic NTLM Authentication Flow
+
+```python
+from impacket import ntlm
+
+# Step 1: Create Type 1 (Negotiate) message
+type1 = ntlm.getNTLMSSPType1(
+    workstation='WORKSTATION',
+    domain='CORP',
+    use_ntlmv2=True
+)
+
+# Send type1.getData() to server...
+# Receive Type 2 (Challenge) from server
+
+# Step 2: Parse Type 2 message
+type2_data = b'...'  # Received from server
+type2 = ntlm.NTLMAuthChallenge(type2_data)
+
+# Step 3: Create Type 3 (Authenticate) message
+type3, session_key = ntlm.getNTLMSSPType3(
+    type1=type1,
+    type2=type2_data,
+    user='admin',
+    password='password',
+    domain='CORP',
+    use_ntlmv2=True
+)
+
+# Send type3.getData() to server
+print(f"Session key: {session_key.hex()}")
+```
+
+### Pass-the-Hash Authentication
+
+```python
+from impacket import ntlm
+
+# Use pre-computed hashes instead of password
+lmhash = 'aad3b435b51404eeaad3b435b51404ee'
+nthash = '8846f7eaee8fb117ad06bdd830b7586c'
+
+type1 = ntlm.getNTLMSSPType1()
+
+# ... receive type2 ...
+
+type3, session_key = ntlm.getNTLMSSPType3(
+    type1=type1,
+    type2=type2_data,
+    user='admin',
+    password='',  # Not used
+    domain='CORP',
+    lmhash=lmhash,
+    nthash=nthash,
+    use_ntlmv2=True
+)
+```
+
+### Computing Password Hashes
+
+```python
+from impacket import ntlm
+import binascii
+
+password = 'Password123!'
+
+# Compute hashes
+lmhash = ntlm.compute_lmhash(password)
+nthash = ntlm.compute_nthash(password)
+
+print(f"LM Hash: {binascii.hexlify(lmhash).decode()}")
+print(f"NT Hash: {binascii.hexlify(nthash).decode()}")
+
+# Use hashes for authentication
+type3, key = ntlm.getNTLMSSPType3(
+    type1, type2, 'user', '',
+    lmhash=binascii.hexlify(lmhash).decode(),
+    nthash=binascii.hexlify(nthash).decode()
+)
+```
+
+### Message Signing
+
+```python
+from impacket import ntlm
+from Cryptodome.Cipher import ARC4
+
+# After authentication, derive signing key
+flags = ntlm.NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY | \
+        ntlm.NTLMSSP_NEGOTIATE_128
+
+signingKey = ntlm.SIGNKEY(flags, session_key, mode='Client')
+
+# Create RC4 cipher handle
+cipher = ARC4.new(signingKey)
+
+# Sign a message
+message = b"Data to sign"
+seqNum = 0
+
+signature = ntlm.SIGN(
+    flags=flags,
+    signingKey=signingKey,
+    message=message,
+    seqNum=seqNum,
+    handle=cipher.encrypt
+)
+
+print(f"Signature: {signature.getData().hex()}")
+```
+
+### Message Encryption (Sealing)
+
+```python
+from impacket import ntlm
+from Cryptodome.Cipher import ARC4
+
+# Derive encryption key
+flags = ntlm.NTLMSSP_NEGOTIATE_SEAL | \
+        ntlm.NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY
+
+signingKey = ntlm.SIGNKEY(flags, session_key, mode='Client')
+sealingKey = ntlm.SEALKEY(flags, session_key, mode='Client')
+
+cipher = ARC4.new(sealingKey)
+
+# Encrypt and sign message
+message = b"Secret data"
+seqNum = 0
+
+sealedMsg, signature = ntlm.SEAL(
+    flags=flags,
+    signingKey=signingKey,
+    sealingKey=sealingKey,
+    messageToSign=message,
+    messageToEncrypt=message,
+    seqNum=seqNum,
+    handle=cipher.encrypt
+)
+
+print(f"Encrypted: {sealedMsg.hex()}")
+print(f"Signature: {signature.getData().hex()}")
+```
+
+### Working with AV_PAIRS
+
+```python
+from impacket import ntlm
+
+# Parse target info from Type 2
+type2 = ntlm.NTLMAuthChallenge(type2_data)
+av_pairs = ntlm.AV_PAIRS(type2['TargetInfoFields'])
+
+# Extract information
+if av_pairs[ntlm.NTLMSSP_AV_DNS_HOSTNAME]:
+    hostname = av_pairs[ntlm.NTLMSSP_AV_DNS_HOSTNAME][1]
+    print(f"Server: {hostname.decode('utf-16le')}")
+
+if av_pairs[ntlm.NTLMSSP_AV_DNS_DOMAINNAME]:
+    domain = av_pairs[ntlm.NTLMSSP_AV_DNS_DOMAINNAME][1]
+    print(f"Domain: {domain.decode('utf-16le')}")
+
+# Add custom fields
+av_pairs[ntlm.NTLMSSP_AV_TARGET_NAME] = \
+    b'http/server.domain.com'.encode('utf-16le')
+
+# Serialize back to bytes
+modified_target_info = av_pairs.getData()
+```
+
+### HTTP NTLM Authentication
+
+```python
+from impacket import ntlm
+import base64
+
+# Step 1: Send initial request, get 401 with WWW-Authenticate: NTLM
+type1 = ntlm.getNTLMSSPType1()
+type1_b64 = base64.b64encode(type1.getData()).decode()
+
+# Send Authorization: NTLM <type1_b64>
+# Receive 401 with WWW-Authenticate: NTLM <type2_b64>
+
+# Step 2: Parse challenge
+type2_b64 = "..."  # From WWW-Authenticate header
+type2_data = base64.b64decode(type2_b64)
+
+type3, session_key = ntlm.getNTLMSSPType3(
+    type1=type1,
+    type2=type2_data,
+    user='admin',
+    password='password',
+    domain='CORP'
+)
+
+type3_b64 = base64.b64encode(type3.getData()).decode()
+
+# Send Authorization: NTLM <type3_b64>
+print(f"Authorization: NTLM {type3_b64}")
+```
+
+### Extracting User Information
+
+```python
+from impacket import ntlm
+
+# Parse Type 3 message
+type3_data = b'...'  # Captured authenticate message
+type3 = ntlm.NTLMAuthChallengeResponse()
+type3.fromString(type3_data)
+
+# Get user info
+user_string = type3.getUserString()
+print(f"User: {user_string}")  # Format: DOMAIN/username
+
+# Get individual fields
+if type3['flags'] & ntlm.NTLMSSP_NEGOTIATE_UNICODE:
+    user = type3['user_name'].decode('utf-16le')
+    domain = type3['domain_name'].decode('utf-16le')
+    workstation = type3['host_name'].decode('utf-16le')
+else:
+    user = type3['user_name'].decode('cp437')
+    domain = type3['domain_name'].decode('cp437')
+    workstation = type3['host_name'].decode('cp437')
+
+print(f"Username: {user}")
+print(f"Domain: {domain}")
+print(f"Workstation: {workstation}")
+```
+
+## Security Considerations
+
+<Warning>
+  NTLMv1 is deprecated and insecure. Always use NTLMv2 when possible by setting `use_ntlmv2=True`.
+</Warning>
+
+<Note>
+  LM hashes are weak and should not be used for authentication. They are computed only from the first 14 characters of passwords converted to uppercase.
+</Note>
+
+### Best Practices
+
+1. **Use NTLMv2** - Set `ntlm.USE_NTLMv2 = True` globally
+2. **Enable signing** - Use `NTLMSSP_NEGOTIATE_SIGN` flag
+3. **Enable sealing** - Use `NTLMSSP_NEGOTIATE_SEAL` for encryption
+4. **Strong passwords** - Use complex passwords to prevent hash cracking
+5. **Extended session security** - Enable `NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY`
+
+## Helper Functions
+
+### NTOWFv2()
+
+Compute NTLMv2 hash.
+
+```python
+hash = ntlm.NTOWFv2(user, password, domain, hash='')
+```
+
+### LMOWFv2()
+
+Compute LMv2 hash.
+
+```python
+hash = ntlm.LMOWFv2(user, password, domain, lmhash='')
+```
+
+### hmac_md5()
+
+Compute HMAC-MD5.
+
+```python
+result = ntlm.hmac_md5(key, data)
+```
+
+## See Also
+
+- [SMBConnection](/api/smbconnection) - Uses NTLM for authentication
+- [SMB](/api/smb) - SMB protocol with NTLM support

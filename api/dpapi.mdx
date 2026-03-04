@@ -1,0 +1,525 @@
+---
+title: 'DPAPI'
+description: 'Data Protection API structures and operations'
+---
+
+## Overview
+
+The `dpapi` module provides structures and functions for working with Windows Data Protection API (DPAPI) encrypted data, master keys, credentials, and vault files.
+
+## Core Concepts
+
+- **Master Keys**: Encryption keys protected by user passwords or domain keys
+- **DPAPI Blobs**: Encrypted data containers with metadata
+- **Credential Files**: Stored credentials encrypted with DPAPI  
+- **Vault Files**: Windows Credential Manager storage
+- **Domain Keys**: RSA keys for domain-based DPAPI
+
+## Master Key Operations
+
+### MasterKeyFile
+
+Container for master key metadata.
+
+```python
+from impacket.dpapi import MasterKeyFile
+
+with open('master_key_file', 'rb') as f:
+    mkf = MasterKeyFile(f.read())
+    mkf.dump()
+
+print(f"GUID: {mkf['Guid'].decode('utf-16le')}")
+print(f"Policy: {mkf['Policy']}")
+```
+
+#### Structure
+
+- **Version**: File format version
+- **Guid**: Unique identifier for the master key
+- **Flags**: Protection flags
+- **Policy**: Key policy settings
+- **MasterKeyLen**: Length of master key data
+- **BackupKeyLen**: Length of backup key data
+- **CredHistLen**: Length of credential history
+- **DomainKeyLen**: Length of domain key data
+
+### MasterKey
+
+Encrypted master key that can be decrypted with user credentials.
+
+```python
+from impacket.dpapi import MasterKey
+
+mk = MasterKey(data=master_key_data)
+mk.dump()
+
+print(f"Algorithm: {mk['HashAlgo']}")
+print(f"Iterations: {mk['MasterKeyIterationCount']}")
+```
+
+#### decrypt()
+
+Decrypt the master key using derived key.
+
+```python
+from impacket.dpapi import MasterKey, deriveKeysFromUser
+
+# Derive keys from user password
+user_sid = 'S-1-5-21-...'
+password = 'UserPassword'
+keys = deriveKeysFromUser(user_sid, password)
+
+# Try each derived key
+mk = MasterKey(data=master_key_data)
+for key in keys:
+    decrypted = mk.decrypt(key)
+    if decrypted:
+        print(f"Decrypted key: {decrypted.hex()}")
+        break
+```
+
+#### Parameters
+
+- **key** (bytes): Derived encryption key
+
+#### Returns
+
+64-byte decrypted master key or None if decryption fails
+
+## DPAPI Blob Decryption
+
+### DPAPI_BLOB
+
+Encrypted data blob with metadata.
+
+```python
+from impacket.dpapi import DPAPI_BLOB
+
+blob = DPAPI_BLOB(encrypted_blob_data)
+blob.dump()
+
+print(f"Master Key GUID: {blob['GuidMasterKey']}")
+print(f"Description: {blob['Description'].decode('utf-16le')}")
+```
+
+#### decrypt()
+
+Decrypt DPAPI blob using master key.
+
+```python
+from impacket.dpapi import DPAPI_BLOB
+from impacket.uuid import bin_to_string
+
+blob = DPAPI_BLOB(encrypted_data)
+mk_guid = bin_to_string(blob['GuidMasterKey'])
+
+# Get corresponding master key
+master_key = get_master_key(mk_guid)  # User function
+
+# Decrypt
+entropy = b''  # Optional additional entropy
+cleartext = blob.decrypt(master_key, entropy)
+
+if cleartext:
+    print(f"Decrypted: {cleartext}")
+else:
+    print("Decryption failed - signature mismatch")
+```
+
+#### Parameters
+
+- **key** (bytes): Decrypted master key
+- **entropy** (bytes): Optional entropy data (default: None)
+
+#### Returns
+
+Decrypted cleartext data or None if verification fails
+
+## Key Derivation
+
+### deriveKeysFromUser()
+
+Derive DPAPI keys from user password.
+
+```python
+from impacket.dpapi import deriveKeysFromUser
+
+sid = 'S-1-5-21-3623811015-3361044348-30300820-1013'
+password = 'UserP@ssw0rd'
+
+keys = deriveKeysFromUser(sid, password)
+# Returns list of 3 keys: [SHA1-based, MD4-based, Protected-users]
+
+for i, key in enumerate(keys):
+    print(f"Key {i}: {key.hex()}")
+```
+
+#### Parameters
+
+- **sid** (str): User SID in canonical format
+- **password** (str): User password
+
+#### Returns
+
+List of derived keys (SHA1, MD4, Protected Users)
+
+### deriveKeysFromUserkey()
+
+Derive DPAPI keys from password hash.
+
+```python
+from impacket.dpapi import deriveKeysFromUserkey
+
+sid = 'S-1-5-21-3623811015-3361044348-30300820-1013'
+nt_hash = bytes.fromhex('8846f7eaee8fb117ad06bdd830b7586c')
+
+keys = deriveKeysFromUserkey(sid, nt_hash)
+
+for key in keys:
+    print(key.hex())
+```
+
+## Credential Structures
+
+### CREDENTIAL_BLOB
+
+Stored credential from Windows Credential Manager.
+
+```python
+from impacket.dpapi import CREDENTIAL_BLOB
+
+cred = CREDENTIAL_BLOB(credential_data)
+cred.dump()
+
+print(f"Target: {cred['Target'].decode('utf-16le')}")
+print(f"Username: {cred['Username'].decode('utf-16le')}")
+print(f"Type: {CREDENTIAL_TYPE(cred['Type']).name}")
+
+# Access attributes
+for attr in cred.attributes:
+    print(f"Attribute: {attr['KeyWord'].decode('utf-16le')}")
+```
+
+### CredentialFile
+
+Container for credential blobs.
+
+```python
+from impacket.dpapi import CredentialFile
+
+cred_file = CredentialFile(file_data)
+blob = DPAPI_BLOB(cred_file['Data'])
+
+# Decrypt blob
+cleartext = blob.decrypt(master_key)
+if cleartext:
+    cred = CREDENTIAL_BLOB(cleartext)
+    cred.dump()
+```
+
+## Credential History
+
+### CREDHIST_FILE
+
+Password history for master key protection.
+
+```python
+from impacket.dpapi import CREDHIST_FILE
+
+with open('CREDHIST', 'rb') as f:
+    credhist = CREDHIST_FILE(f.read())
+    credhist.dump()
+
+# Decrypt all entries
+from impacket.dpapi import deriveKeysFromUser
+
+keys = deriveKeysFromUser(user_sid, current_password)
+credhist.decrypt(keys[0])  # Will decrypt chain recursively
+
+# Access decrypted hashes
+for entry in credhist.credhist_entries_list:
+    if entry.nthash:
+        print(f"NT Hash: {entry.nthash.hex()}")
+```
+
+### CREDHIST_ENTRY
+
+Single credential history entry.
+
+```python
+from impacket.dpapi import CREDHIST_ENTRY
+
+entry = CREDHIST_ENTRY(entry_data)
+entry.dump()
+
+print(f"SID: {entry.sid}")
+print(f"Rounds: {entry['Rounds']}")
+
+# Decrypt with password hash
+entry.decrypt(sha1_hash)
+if entry.pwdhash:
+    print(f"Password hash: {entry.pwdhash.hex()}")
+    print(f"NT hash: {entry.nthash.hex()}")
+```
+
+## Vault Operations
+
+### VAULT_VCRD
+
+Vault credential record.
+
+```python
+from impacket.dpapi import VAULT_VCRD
+
+vcrd = VAULT_VCRD(vcrd_data)
+vcrd.dump()
+
+print(f"Schema GUID: {bin_to_string(vcrd['SchemaGuid'])}")
+print(f"Friendly Name: {vcrd['FriendlyName'].decode('utf-16le')}")
+
+# Access attributes
+for i, attr in enumerate(vcrd.attributes):
+    print(f"Attribute {i}:")
+    if 'Data' in attr.fields:
+        print(f"  Data: {attr['Data'].hex()}")
+```
+
+### VAULT_VPOL
+
+Vault policy containing encryption keys.
+
+```python
+from impacket.dpapi import VAULT_VPOL
+
+vpol = VAULT_VPOL(vpol_data)
+vpol.dump()
+
+# Decrypt the embedded DPAPI blob
+blob = vpol['Blob']
+cleartext = blob.decrypt(master_key)
+
+if cleartext:
+    # Parse vault keys
+    from impacket.dpapi import VAULT_VPOL_KEYS
+    keys = VAULT_VPOL_KEYS(cleartext)
+    keys.dump()
+```
+
+### VAULT_VPOL_KEYS
+
+Decrypted vault AES keys.
+
+```python
+from impacket.dpapi import VAULT_VPOL_KEYS
+
+keys = VAULT_VPOL_KEYS(decrypted_vpol_data)
+keys.dump()
+
+aes_key1 = keys['Key1']['bKeyBlob']['bKey']
+aes_key2 = keys['Key2']['bKeyBlob']['bKey']
+
+print(f"AES Key 1: {aes_key1.hex()}")
+print(f"AES Key 2: {aes_key2.hex()}")
+```
+
+## Known Vault Schemas
+
+### VAULT_INTERNET_EXPLORER
+
+Internet Explorer/Edge credentials.
+
+```python
+from impacket.dpapi import VAULT_INTERNET_EXPLORER
+
+# Decrypt vault attribute data with AES key
+from Cryptodome.Cipher import AES
+
+cipher = AES.new(aes_key, AES.MODE_CBC, iv=iv_data)
+decrypted = cipher.decrypt(encrypted_attr_data)
+
+ie_cred = VAULT_INTERNET_EXPLORER(decrypted)
+ie_cred.dump()
+
+print(f"Username: {ie_cred['Username'].decode('utf-16le')}")
+print(f"Resource: {ie_cred['Resource'].decode('utf-16le')}")
+print(f"Password: {ie_cred['Password'].hex()}")
+```
+
+### VAULT_WIN_BIO_KEY
+
+Windows Hello biometric key.
+
+```python
+from impacket.dpapi import VAULT_WIN_BIO_KEY
+
+bio = VAULT_WIN_BIO_KEY(decrypted_data)
+bio.dump()
+
+print(f"Biometric Key: {bio['BioKey']['bKey'].hex()}")
+```
+
+## Domain DPAPI
+
+### DPAPI_DOMAIN_RSA_MASTER_KEY
+
+Domain-backed master key.
+
+```python
+from impacket.dpapi import DPAPI_DOMAIN_RSA_MASTER_KEY
+
+domain_key = DPAPI_DOMAIN_RSA_MASTER_KEY(domain_key_data)
+
+# Extract encrypted master key
+encrypted_mk = domain_key['buffer'][:domain_key['cbMasterKey']]
+
+# Decrypt with domain private key (requires domain backup key)
+```
+
+### PRIVATE_KEY_BLOB
+
+RSA private key in Windows format.
+
+```python
+from impacket.dpapi import PRIVATE_KEY_BLOB, privatekeyblob_to_pkcs1
+
+privkey = PRIVATE_KEY_BLOB(key_data)
+
+# Convert to usable RSA key
+rsa_key = privatekeyblob_to_pkcs1(privkey)
+
+# Use for decryption
+from Cryptodome.Cipher import PKCS1_OAEP
+cipher = PKCS1_OAEP.new(rsa_key)
+plaintext = cipher.decrypt(encrypted_data)
+```
+
+## Encryption Algorithms
+
+### ALGORITHMS Enum
+
+Supported cryptographic algorithms.
+
+```python
+from impacket.dpapi import ALGORITHMS
+
+ALGORITHMS.CALG_SHA.value       # SHA-1
+ALGORITHMS.CALG_SHA_512.value   # SHA-512  
+ALGORITHMS.CALG_3DES.value      # 3DES
+ALGORITHMS.CALG_AES_256.value   # AES-256
+ALGORITHMS.CALG_HMAC.value      # HMAC
+```
+
+## Complete Examples
+
+### Decrypt Master Key
+
+```python
+from impacket.dpapi import (
+    MasterKeyFile, MasterKey, deriveKeysFromUser
+)
+import os
+
+# Read master key file
+mk_path = os.path.expanduser(
+    '~/.local/share/dpapi/masterkeys/12345678-1234-1234-1234-123456789012'
+)
+
+with open(mk_path, 'rb') as f:
+    mkf_data = f.read()
+
+mkf = MasterKeyFile(mkf_data)
+mk_data = mkf_data[len(mkf):len(mkf) + mkf['MasterKeyLen']]
+mk = MasterKey(mk_data)
+
+# Derive keys from password
+user_sid = 'S-1-5-21-...'
+password = 'UserPassword'
+keys = deriveKeysFromUser(user_sid, password)
+
+# Try to decrypt
+for key in keys:
+    decrypted_key = mk.decrypt(key)
+    if decrypted_key:
+        print(f"Master Key: {decrypted_key.hex()}")
+        break
+```
+
+### Decrypt DPAPI Blob
+
+```python
+from impacket.dpapi import DPAPI_BLOB
+from impacket.uuid import bin_to_string
+
+# Load encrypted data
+with open('encrypted.bin', 'rb') as f:
+    encrypted_data = f.read()
+
+blob = DPAPI_BLOB(encrypted_data)
+
+# Get master key GUID
+mk_guid = bin_to_string(blob['GuidMasterKey'])
+print(f"Required Master Key: {mk_guid}")
+
+# Load and decrypt master key (see previous example)
+master_key = get_decrypted_master_key(mk_guid)
+
+# Decrypt blob
+cleartext = blob.decrypt(master_key)
+
+if cleartext:
+    print(f"Decrypted data: {cleartext}")
+    with open('decrypted.bin', 'wb') as f:
+        f.write(cleartext)
+else:
+    print("Failed to decrypt - wrong key or corrupted data")
+```
+
+### Extract Vault Credentials
+
+```python
+from impacket.dpapi import (
+    VAULT_VPOL, VAULT_VPOL_KEYS, VAULT_VCRD, VAULT_INTERNET_EXPLORER
+)
+from Cryptodome.Cipher import AES
+from Cryptodome.Util.Padding import unpad
+
+# Decrypt VPOL to get AES keys
+vpol = VAULT_VPOL(vpol_data)
+vpol_cleartext = vpol['Blob'].decrypt(master_key)
+keys = VAULT_VPOL_KEYS(vpol_cleartext)
+
+aes_key = keys['Key1']['bKeyBlob']['bKey']
+
+# Load VCRD
+vcrd = VAULT_VCRD(vcrd_data)
+
+# Find encrypted attribute (usually attribute ID 1 or 100)
+for attr in vcrd.attributes:
+    if attr['Id'] == 100 and 'Data' in attr.fields:
+        encrypted = attr['Data']
+        iv = attr['IV'] if 'IV' in attr.fields else b'\x00' * 16
+        
+        # Decrypt with AES
+        cipher = AES.new(aes_key, AES.MODE_CBC, iv)
+        decrypted = unpad(cipher.decrypt(encrypted), AES.block_size)
+        
+        # Parse as IE credential
+        ie_cred = VAULT_INTERNET_EXPLORER(decrypted)
+        print(f"URL: {ie_cred['Resource'].decode('utf-16le')}")
+        print(f"Username: {ie_cred['Username'].decode('utf-16le')}")
+        print(f"Password: {ie_cred['Password'].hex()}")
+```
+
+## Security Considerations
+
+1. **Protect decrypted keys** - Master keys provide access to all user data
+2. **Secure password storage** - Passwords used for key derivation
+3. **Verify signatures** - DPAPI blobs include HMAC signatures
+4. **Handle errors** - Decryption can fail with wrong keys
+5. **Clear sensitive data** - Overwrite keys and passwords after use
+
+## References
+
+- [Windows DPAPI](https://docs.microsoft.com/en-us/previous-versions/ms995355(v=msdn.10))
+- [DPAPI Secrets](https://www.passcape.com/index.php?section=docsys&cmd=details&id=28)
+- [Mimikatz DPAPI](https://github.com/gentilkiwi/mimikatz/wiki/howto-~-credential-manager-saved-credentials)

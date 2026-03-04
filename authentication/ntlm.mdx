@@ -1,0 +1,367 @@
+---
+title: NTLM Authentication
+description: Working with NTLM protocol, hash computation, and authentication in Impacket
+---
+
+NTLM (NT LAN Manager) is a suite of Microsoft security protocols that provides authentication, integrity, and confidentiality to users. Impacket provides comprehensive support for NTLM authentication in both client and server scenarios.
+
+## NTLM Overview
+
+NTLM authentication uses a challenge-response mechanism:
+
+1. Client requests authentication
+2. Server sends an 8-byte random challenge
+3. Client encrypts the challenge with the user's password hash
+4. Server verifies the response
+
+## Computing NTLM Hashes
+
+### NT Hash Computation
+
+The NT hash (also called NTLM hash) is an MD4 hash of the user's password in UTF-16LE encoding:
+
+```python
+from impacket.ntlm import compute_nthash
+from binascii import hexlify
+
+password = "Password123"
+nthash = compute_nthash(password)
+print(f"NT Hash: {hexlify(nthash).decode()}")
+# Output: NT Hash: 8846f7eaee8fb117ad06bdd830b7586c
+```
+
+### LM Hash Computation
+
+<Warning>
+LM hashes are cryptographically weak and should not be used. They're included only for legacy compatibility.
+</Warning>
+
+```python
+from impacket.ntlm import compute_lmhash
+from binascii import hexlify
+
+password = "password"  # LM converts to uppercase and truncates at 14 chars
+lmhash = compute_lmhash(password)
+print(f"LM Hash: {hexlify(lmhash).decode()}")
+
+# For passwords with non-latin1 characters, default LM hash is returned
+password_unicode = "пароль"  # Russian word for password
+lmhash = compute_lmhash(password_unicode)
+print(f"LM Hash: {hexlify(lmhash).decode()}")
+# Output: aad3b435b51404eeaad3b435b51404ee (default empty hash)
+```
+
+## NTLMv1 vs NTLMv2
+
+### NTLMv1 (Legacy)
+
+NTLMv1 is the original NTLM protocol. It's vulnerable to various attacks:
+
+```python
+import impacket.ntlm as ntlm
+from binascii import unhexlify
+
+# Force NTLMv1 (not recommended)
+ntlm.USE_NTLMv2 = False
+
+# Compute NTLMv1 response
+serverChallenge = b'\x01\x23\x45\x67\x89\xab\xcd\xef'
+clientChallenge = b'\x11\x22\x33\x44\x55\x66\x77\x88'
+password = 'Password123'
+
+nthash = ntlm.compute_nthash(password)
+lmhash = ntlm.compute_lmhash(password)
+
+ntResponse, lmResponse, sessionKey = ntlm.computeResponseNTLMv1(
+    flags=0,
+    serverChallenge=serverChallenge,
+    clientChallenge=clientChallenge,
+    serverName='',
+    domain='DOMAIN',
+    user='user',
+    password=password,
+    lmhash='',
+    nthash=''
+)
+```
+
+### NTLMv2 (Recommended)
+
+NTLMv2 provides enhanced security with stronger cryptography:
+
+```python
+import impacket.ntlm as ntlm
+from binascii import unhexlify
+
+# Use NTLMv2 (default)
+ntlm.USE_NTLMv2 = True
+
+serverChallenge = b'\x01\x23\x45\x67\x89\xab\xcd\xef'
+clientChallenge = b'\x11\x22\x33\x44\x55\x66\x77\x88'
+serverName = b''  # Target info from CHALLENGE message
+
+ntResponse, lmResponse, sessionKey = ntlm.computeResponseNTLMv2(
+    flags=ntlm.NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY,
+    serverChallenge=serverChallenge,
+    clientChallenge=clientChallenge,
+    serverName=serverName,
+    domain='DOMAIN',
+    user='user',
+    password='Password123',
+    lmhash='',
+    nthash=''
+)
+```
+
+## NTLM Message Exchange
+
+### Type 1: Negotiate Message
+
+Client initiates authentication:
+
+```python
+from impacket.ntlm import getNTLMSSPType1
+
+# Create Type 1 message
+auth = getNTLMSSPType1(
+    workstation='WORKSTATION',
+    domain='DOMAIN',
+    signingRequired=False,
+    use_ntlmv2=True
+)
+
+type1_message = auth.getData()
+print(f"Type 1 message length: {len(type1_message)} bytes")
+```
+
+### Type 2: Challenge Message
+
+Server responds with challenge:
+
+```python
+from impacket.ntlm import NTLMAuthChallenge
+import os
+
+# Parse Type 2 message received from server
+type2_data = b'NTLMSSP\x00...'  # Received from server
+challengeMessage = NTLMAuthChallenge(type2_data)
+
+print(f"Server challenge: {challengeMessage['challenge'].hex()}")
+print(f"Target name: {challengeMessage['domain_name']}")
+print(f"Target info: {challengeMessage['TargetInfoFields']}")
+```
+
+### Type 3: Authenticate Message
+
+Client proves identity:
+
+```python
+from impacket.ntlm import getNTLMSSPType3
+from binascii import unhexlify
+
+# Create Type 3 message
+type3, exportedSessionKey = getNTLMSSPType3(
+    type1=auth,                    # From earlier
+    type2=type2_data,              # From server
+    user='user',
+    password='Password123',
+    domain='DOMAIN',
+    lmhash='',
+    nthash='',
+    use_ntlmv2=True
+)
+
+type3_message = type3.getData()
+print(f"Type 3 message ready for server")
+```
+
+## Pass-the-Hash with NTLM
+
+Authenticate using only the NT hash (no plaintext password needed):
+
+```python
+from impacket.smbconnection import SMBConnection
+from binascet import unhexlify
+
+# NT hash obtained from secretsdump or other sources
+lmhash = 'aad3b435b51404eeaad3b435b51404ee'  # Empty LM hash
+nthash = '8846f7eaee8fb117ad06bdd830b7586c'
+
+# Connect using hash
+smbClient = SMBConnection('192.168.1.10', '192.168.1.10')
+smbClient.login('Administrator', '', 'WORKGROUP', lmhash, nthash)
+
+print("Authenticated successfully!")
+shares = smbClient.listShares()
+for share in shares:
+    print(f"  {share['shi1_netname']}")
+```
+
+## NTLM Relay Protection
+
+When implementing NTLM authentication, be aware of relay attacks:
+
+```python
+from impacket.ntlm import NTLMSSP_NEGOTIATE_SIGN, NTLMSSP_NEGOTIATE_SEAL
+
+# Request signing to prevent relay attacks
+auth = getNTLMSSPType1(
+    workstation='WORKSTATION',
+    domain='DOMAIN',
+    signingRequired=True,  # Enable signing
+    use_ntlmv2=True
+)
+
+# Check if server supports signing
+if challengeMessage['flags'] & NTLMSSP_NEGOTIATE_SIGN:
+    print("Server supports message signing")
+if challengeMessage['flags'] & NTLMSSP_NEGOTIATE_SEAL:
+    print("Server supports message encryption")
+```
+
+## NTLM Flags and Options
+
+Common NTLM negotiation flags:
+
+```python
+from impacket.ntlm import (
+    NTLMSSP_NEGOTIATE_UNICODE,          # Unicode encoding
+    NTLMSSP_NEGOTIATE_NTLM,             # NTLM authentication
+    NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY,  # NTLMv2
+    NTLMSSP_NEGOTIATE_SIGN,             # Message signing
+    NTLMSSP_NEGOTIATE_SEAL,             # Message encryption
+    NTLMSSP_NEGOTIATE_KEY_EXCH,         # Key exchange
+    NTLMSSP_NEGOTIATE_128,              # 128-bit encryption
+    NTLMSSP_NEGOTIATE_56,               # 56-bit encryption
+    NTLMSSP_NEGOTIATE_TARGET_INFO,      # Server info
+)
+
+# Build custom flags
+flags = (
+    NTLMSSP_NEGOTIATE_UNICODE |
+    NTLMSSP_NEGOTIATE_NTLM |
+    NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY |
+    NTLMSSP_NEGOTIATE_SIGN |
+    NTLMSSP_NEGOTIATE_SEAL |
+    NTLMSSP_NEGOTIATE_128
+)
+
+auth['flags'] = flags
+```
+
+## Working with NTLM Session Keys
+
+Session keys provide message integrity and confidentiality:
+
+```python
+from impacket.ntlm import SIGNKEY, SEALKEY
+
+# After successful authentication
+randomSessionKey = exportedSessionKey  # From Type 3 response
+
+# Generate signing key for client-to-server
+signingKey = SIGNKEY(
+    flags=NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY,
+    randomSessionKey=randomSessionKey,
+    mode='Client'
+)
+
+# Generate sealing (encryption) key
+sealingKey = SEALKEY(
+    flags=NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY | NTLMSSP_NEGOTIATE_128,
+    randomSessionKey=randomSessionKey,
+    mode='Client'
+)
+
+print(f"Signing key: {signingKey.hex()}")
+print(f"Sealing key: {sealingKey.hex()}")
+```
+
+## Practical Examples
+
+### Example 1: SMB Authentication with Hashes
+
+```python
+from impacket.smbconnection import SMBConnection
+import sys
+
+def connect_with_hash(target, username, nthash, domain=''):
+    try:
+        lmhash = 'aad3b435b51404eeaad3b435b51404ee'
+        
+        smbClient = SMBConnection(target, target)
+        smbClient.login(username, '', domain, lmhash, nthash)
+        
+        print(f"[+] Successfully authenticated as {domain}\\{username}")
+        
+        shares = smbClient.listShares()
+        print("\n[+] Available shares:")
+        for share in shares:
+            print(f"  - {share['shi1_netname']}: {share['shi1_remark']}")
+        
+        return smbClient
+    except Exception as e:
+        print(f"[-] Authentication failed: {str(e)}")
+        sys.exit(1)
+
+# Usage
+smb = connect_with_hash(
+    target='192.168.1.10',
+    username='Administrator',
+    nthash='8846f7eaee8fb117ad06bdd830b7586c',
+    domain='CORP'
+)
+```
+
+### Example 2: Extract NT Hash from User Input
+
+```python
+from impacket.ntlm import compute_nthash
+from binascii import hexlify
+import getpass
+
+def get_nthash_from_password():
+    password = getpass.getpass("Enter password: ")
+    nthash = compute_nthash(password)
+    hash_hex = hexlify(nthash).decode()
+    
+    print(f"\nNT Hash: {hash_hex}")
+    print(f"\nUse this with Impacket tools:")
+    print(f"  -hashes :{hash_hex}")
+    
+    return hash_hex
+
+hash_value = get_nthash_from_password()
+```
+
+## Security Best Practices
+
+<Warning>
+**NTLM Security Considerations:**
+
+1. **Prefer Kerberos**: Use Kerberos authentication when possible, especially in Active Directory environments
+2. **Use NTLMv2**: Never downgrade to NTLMv1 unless absolutely necessary
+3. **Enable Signing**: Always request message signing to prevent relay attacks
+4. **Channel Binding**: Use Extended Protection for Authentication (EPA) when available
+5. **Monitor Usage**: Log and monitor NTLM authentication attempts
+</Warning>
+
+<Info>
+NTLM is considered a legacy protocol. Microsoft recommends disabling NTLM and using Kerberos for all modern Windows environments. However, NTLM remains useful for:
+
+- Workgroup (non-domain) environments
+- Legacy application compatibility
+- Security testing and research
+- Situations where Kerberos is unavailable
+</Info>
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="Pass-the-Hash" icon="fingerprint" href="/authentication/pass-the-hash">
+    Learn techniques for reusing NTLM hashes
+  </Card>
+  <Card title="Kerberos Auth" icon="ticket" href="/authentication/kerberos-auth">
+    Upgrade to Kerberos for better security
+  </Card>
+</CardGroup>

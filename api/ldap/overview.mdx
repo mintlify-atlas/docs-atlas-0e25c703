@@ -1,0 +1,136 @@
+---
+title: 'LDAP Overview'
+description: 'LDAP protocol implementation for Active Directory interactions'
+---
+
+## Overview
+
+The Impacket LDAP module provides a minimalistic implementation of RFC 4511 with Active Directory-specific functionality (MS-ADTS). It enables LDAP operations against domain controllers for querying and manipulating directory data.
+
+## Key Components
+
+### LDAPConnection
+The main class for establishing and managing LDAP connections with support for:
+- LDAP and LDAPS protocols
+- NTLM and Kerberos authentication
+- LDAP signing and sealing
+- Paged search results
+- Channel binding for LDAPS
+
+### ldaptypes Module
+Structures for working with LDAP-specific data types including:
+- Security descriptors (SR_SECURITY_DESCRIPTOR)
+- Access Control Lists (ACL)
+- Access Control Entries (ACE)
+- Security Identifiers (LDAP_SID)
+
+## Connection URLs
+
+Supported URL formats:
+- `ldap://hostname` - Standard LDAP (port 389)
+- `ldaps://hostname` - LDAP over SSL (port 636)
+- `gc://hostname` - Global Catalog (port 3268)
+
+## Authentication Methods
+
+### NTLM Authentication
+```python
+from impacket.ldap import ldap
+
+ldap_conn = ldap.LDAPConnection('ldap://dc.example.com', baseDN='DC=example,DC=com')
+ldap_conn.login(user='admin', password='password', domain='EXAMPLE')
+```
+
+### Kerberos Authentication
+```python
+ldap_conn.kerberosLogin(
+    user='admin',
+    password='password', 
+    domain='EXAMPLE.COM',
+    kdcHost='dc.example.com'
+)
+```
+
+## Common Operations
+
+### Search
+```python
+from impacket.ldap.ldapasn1 import Scope
+
+results = ldap_conn.search(
+    searchBase='DC=example,DC=com',
+    searchFilter='(objectClass=user)',
+    scope=Scope('wholeSubtree'),
+    attributes=['sAMAccountName', 'distinguishedName']
+)
+```
+
+### Add Entry
+```python
+ldap_conn.add(
+    dn='CN=NewUser,CN=Users,DC=example,DC=com',
+    objectClass=['top', 'person', 'user'],
+    attributes={
+        'sAMAccountName': 'newuser',
+        'userPrincipalName': 'newuser@example.com'
+    }
+)
+```
+
+### Modify Entry
+```python
+from impacket.ldap.ldap import MODIFY_REPLACE
+
+ldap_conn.modify(
+    dn='CN=User,CN=Users,DC=example,DC=com',
+    modifications={
+        'description': [(MODIFY_REPLACE, 'Updated description')]
+    }
+)
+```
+
+### Delete Entry
+```python
+ldap_conn.delete('CN=User,CN=Users,DC=example,DC=com')
+```
+
+## Paged Searches
+
+For large result sets, use paged searches:
+
+```python
+from impacket.ldap.ldapasn1 import SimplePagedResultsControl
+
+paged_control = SimplePagedResultsControl(size=1000)
+results = ldap_conn.search(
+    searchBase='DC=example,DC=com',
+    searchFilter='(objectClass=*)',
+    searchControls=[paged_control]
+)
+```
+
+## Security Considerations
+
+- Always use LDAPS when possible for encrypted communication
+- Enable signing for LDAP connections to prevent tampering
+- Channel binding is automatically applied for LDAPS connections
+- Kerberos authentication supports mutual authentication
+
+## Error Handling
+
+```python
+from impacket.ldap.ldap import LDAPSessionError, LDAPSearchError
+
+try:
+    results = ldap_conn.search(searchFilter='(invalid)')
+except LDAPSearchError as e:
+    print(f"Search failed: {e.getErrorString()}")
+    partial_results = e.getAnswers()
+except LDAPSessionError as e:
+    print(f"Session error: {e.getErrorString()}")
+```
+
+## References
+
+- [RFC 4511](https://tools.ietf.org/html/rfc4511) - LDAP Protocol
+- [MS-ADTS](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-adts/) - Active Directory Technical Specification

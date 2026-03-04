@@ -1,0 +1,376 @@
+---
+title: 'DCE/RPC Interfaces'
+description: 'Comprehensive guide to using DCE/RPC interfaces in Impacket'
+---
+
+## Overview
+
+Impacket provides extensive support for DCE/RPC (Distributed Computing Environment/Remote Procedure Call) interfaces, which are fundamental to Windows network protocols. These interfaces allow you to interact with various Windows services remotely.
+
+## Available Interfaces
+
+Impacket implements numerous MS-RPC interfaces located in `impacket/dcerpc/v5/`. Each interface corresponds to a specific Windows service.
+
+### Security Account Manager (SAMR)
+
+**Module**: `impacket.dcerpc.v5.samr`  
+**UUID**: `12345778-1234-ABCD-EF00-0123456789AC`  
+**Protocol**: [MS-SAMR]
+
+SAMR provides access to domain user and group information.
+
+```python
+from impacket.dcerpc.v5 import transport, samr
+from impacket.dcerpc.v5.dtypes import MAXIMUM_ALLOWED
+
+# Create SMB transport and connect
+rpctransport = transport.SMBTransport('192.168.1.100', filename=r'\samr')
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(samr.MSRPC_UUID_SAMR)
+
+# Open policy with helper function
+resp = samr.hSamrConnect(dce)
+serverHandle = resp['ServerHandle']
+
+# Enumerate domains
+resp = samr.hSamrEnumerateDomainsInSamServer(dce, serverHandle)
+domains = resp['Buffer']['Buffer']
+
+for domain in domains:
+    print(f"Domain: {domain['Name']}")
+
+# Open domain
+resp = samr.hSamrLookupDomainInSamServer(dce, serverHandle, domains[0]['Name'])
+domainSid = resp['DomainId']
+
+resp = samr.hSamrOpenDomain(dce, serverHandle, domainSid=domainSid)
+domainHandle = resp['DomainHandle']
+
+# Enumerate users
+resp = samr.hSamrEnumerateUsersInDomain(dce, domainHandle)
+for user in resp['Buffer']['Buffer']:
+    print(f"User RID: {user['RelativeId']}, Name: {user['Name']}")
+
+# Close handles
+samr.hSamrCloseHandle(dce, domainHandle)
+samr.hSamrCloseHandle(dce, serverHandle)
+dce.disconnect()
+```
+
+**Key Functions**:
+- `hSamrConnect()` - Connect to SAM server
+- `hSamrEnumerateDomainsInSamServer()` - List domains
+- `hSamrEnumerateUsersInDomain()` - List users
+- `hSamrOpenUser()` - Open user object
+- `hSamrQueryInformationUser()` - Get user details
+- `hSamrGetMembersInGroup()` - List group members
+
+### Local Security Authority (LSAD)
+
+**Module**: `impacket.dcerpc.v5.lsad`  
+**UUID**: `12345778-1234-ABCD-EF00-0123456789AB`  
+**Protocol**: [MS-LSAD]
+
+LSAD manages local security policies and trusted domain information.
+
+```python
+from impacket.dcerpc.v5 import transport, lsad, lsat
+from impacket.dcerpc.v5.dtypes import MAXIMUM_ALLOWED, RPC_SID
+
+rpctransport = transport.SMBTransport('192.168.1.100', filename=r'\lsarpc')
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(lsad.MSRPC_UUID_LSAD)
+
+# Open policy
+resp = lsad.hLsarOpenPolicy2(dce, MAXIMUM_ALLOWED | lsad.POLICY_LOOKUP_NAMES)
+policyHandle = resp['PolicyHandle']
+
+# Query policy information
+resp = lsad.hLsarQueryInformationPolicy2(
+    dce, 
+    policyHandle,
+    lsad.POLICY_INFORMATION_CLASS.PolicyAccountDomainInformation
+)
+print(f"Domain: {resp['PolicyInformation']['PolicyAccountDomainInfo']['DomainName']}")
+print(f"SID: {resp['PolicyInformation']['PolicyAccountDomainInfo']['DomainSid'].formatCanonical()}")
+
+# Enumerate accounts
+resp = lsad.hLsarEnumerateAccounts(dce, policyHandle)
+for account in resp['EnumerationBuffer']['Information']:
+    print(f"Account SID: {account['Sid'].formatCanonical()}")
+
+# Enumerate trusted domains
+resp = lsad.hLsarEnumerateTrustedDomainsEx(dce, policyHandle)
+for domain in resp['EnumerationBuffer']['EnumerationBuffer']:
+    print(f"Trusted Domain: {domain['Name']}")
+
+lsad.hLsarClose(dce, policyHandle)
+dce.disconnect()
+```
+
+### Directory Replication Service (DRSUAPI)
+
+**Module**: `impacket.dcerpc.v5.drsuapi`  
+**UUID**: `E3514235-4B06-11D1-AB04-00C04FC2DCD2`  
+**Protocol**: [MS-DRSR]
+
+DRSUAPI enables Active Directory replication and is used for DCSync attacks.
+
+```python
+from impacket.dcerpc.v5 import transport, drsuapi
+from impacket.dcerpc.v5.dtypes import NULL
+
+rpctransport = transport.SMBTransport('dc.domain.local', filename=r'\drsuapi')
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(drsuapi.MSRPC_UUID_DRSUAPI)
+
+# Bind to DRS service
+request = drsuapi.DRSBind()
+request['puuidClientDsa'] = drsuapi.NTDSAPI_CLIENT_GUID
+drs_extensions = drsuapi.DRS_EXTENSIONS()
+drs_extensions['cb'] = len(drs_extensions)
+drs_extensions['dwFlags'] = drsuapi.DRS_EXT_GETCHGREQ_V6 | drsuapi.DRS_EXT_GETCHGREPLY_V6
+request['pextClient']['cb'] = len(drs_extensions)
+request['pextClient']['rgb'] = list(drs_extensions.getData())
+
+resp = dce.request(request)
+hDrs = resp['phDrs']
+
+# Request domain info
+request = drsuapi.DRSDomainControllerInfo()
+request['hDrs'] = hDrs
+request['dwInVersion'] = 1
+request['pmsgIn']['tag'] = 1
+request['pmsgIn']['V1']['Domain'] = 'domain.local\x00'
+request['pmsgIn']['V1']['InfoLevel'] = 2
+
+resp = dce.request(request)
+for dc in resp['pmsgOut']['V2']['rItems']:
+    print(f"DC: {dc['DnsHostName']}")
+
+# Unbind
+request = drsuapi.DRSUnbind()
+request['phDrs'] = hDrs
+dce.request(request)
+dce.disconnect()
+```
+
+### Service Control Manager (SCMR)
+
+**Module**: `impacket.dcerpc.v5.scmr`  
+**UUID**: `367ABB81-9844-35F1-AD32-98F038001003`  
+**Protocol**: [MS-SCMR]
+
+SCMR manages Windows services remotely.
+
+```python
+from impacket.dcerpc.v5 import transport, scmr
+
+rpctransport = transport.SMBTransport('192.168.1.100', filename=r'\svcctl')
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(scmr.MSRPC_UUID_SCMR)
+
+# Open service manager
+resp = scmr.hROpenSCManagerW(dce)
+scmHandle = resp['lpScHandle']
+
+# Enumerate services
+resp = scmr.hREnumServicesStatusW(dce, scmHandle)
+for service in resp['lpServices']:
+    print(f"Service: {service['lpServiceName']}, State: {service['ServiceStatus']['dwCurrentState']}")
+
+# Open specific service
+resp = scmr.hROpenServiceW(dce, scmHandle, 'Spooler\x00')
+serviceHandle = resp['lpScHandle']
+
+# Query service status
+resp = scmr.hRQueryServiceStatus(dce, serviceHandle)
+print(f"Status: {resp['lpServiceStatus']['dwCurrentState']}")
+
+# Create and start service (for lateral movement)
+resp = scmr.hRCreateServiceW(
+    dce, 
+    scmHandle,
+    'MyService\x00',
+    'My Service\x00',
+    lpBinaryPathName='C:\\\\Windows\\\\System32\\\\cmd.exe\x00'
+)
+serviceHandle = resp['lpScHandle']
+
+scmr.hRStartServiceW(dce, serviceHandle)
+scmr.hRDeleteService(dce, serviceHandle)
+
+scmr.hRCloseServiceHandle(dce, serviceHandle)
+scmr.hRCloseServiceHandle(dce, scmHandle)
+dce.disconnect()
+```
+
+### Server Service (SRVS)
+
+**Module**: `impacket.dcerpc.v5.srvs`  
+**UUID**: `4B324FC8-1670-01D3-1278-5A47BF6EE188`  
+**Protocol**: [MS-SRVS]
+
+SRVS provides information about SMB shares and sessions.
+
+```python
+from impacket.dcerpc.v5 import transport, srvs
+
+rpctransport = transport.SMBTransport('192.168.1.100', filename=r'\srvsvc')
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(srvs.MSRPC_UUID_SRVS)
+
+# Enumerate shares
+resp = srvs.hNetrShareEnum(dce, 1)
+for share in resp['InfoStruct']['ShareInfo']['Level1']['Buffer']:
+    print(f"Share: {share['shi1_netname'][:-1]}, Type: {share['shi1_type']}")
+    print(f"  Comment: {share['shi1_remark'][:-1]}")
+
+# Get share info
+resp = srvs.hNetrShareGetInfo(dce, 'C$\x00', 502)
+print(f"Path: {resp['InfoStruct']['ShareInfo502']['shi502_path'][:-1]}")
+print(f"Max users: {resp['InfoStruct']['ShareInfo502']['shi502_max_uses']}")
+
+# Enumerate sessions
+resp = srvs.hNetrSessionEnum(dce, NULL, NULL, 10)
+for session in resp['InfoStruct']['SessionInfo']['Level10']['Buffer']:
+    print(f"User: {session['sesi10_username']}, Computer: {session['sesi10_cname']}")
+
+dce.disconnect()
+```
+
+### Other Important Interfaces
+
+#### Task Scheduler (TSCH)
+**Module**: `impacket.dcerpc.v5.tsch`  
+**Pipe**: `\atsvc`  
+Schedule remote task execution.
+
+#### Windows Registry (RRP)
+**Module**: `impacket.dcerpc.v5.rrp`  
+**Pipe**: `\winreg`  
+Remote registry access.
+
+#### Netlogon (NRPC)
+**Module**: `impacket.dcerpc.v5.nrpc`  
+**Pipe**: `\netlogon`  
+Netlogon protocol for authentication.
+
+#### Event Log (EVEN)
+**Module**: `impacket.dcerpc.v5.even`  
+**Pipe**: `\eventlog`  
+Remote event log access.
+
+#### Print Spooler (RPRN)
+**Module**: `impacket.dcerpc.v5.rprn`  
+**Pipe**: `\spoolss`  
+Print spooler service.
+
+## Connection and Binding
+
+### Transport Types
+
+```python
+from impacket.dcerpc.v5 import transport
+
+# SMB transport (most common)
+rpctransport = transport.SMBTransport(
+    '192.168.1.100',
+    445,
+    filename=r'\samr',
+    username='user',
+    password='pass',
+    domain='DOMAIN'
+)
+
+# TCP transport
+rpctransport = transport.TCPTransport('192.168.1.100', 135)
+
+# HTTP transport
+rpctransport = transport.HTTPTransport('192.168.1.100', 593)
+
+# Get DCE/RPC instance
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+
+# Bind to interface UUID
+dce.bind(interface_uuid)
+```
+
+### Authentication
+
+```python
+# NTLM authentication
+rpctransport.set_credentials('username', 'password', 'DOMAIN')
+
+# Kerberos authentication
+import os
+os.environ['KRB5CCNAME'] = '/tmp/krb5cc_1000'
+rpctransport.set_kerberos(True, kdcHost='dc.domain.local')
+
+# Use existing SMB connection
+from impacket.dcerpc.v5.transport import SMBTransport
+from impacket.smbconnection import SMBConnection
+
+smbClient = SMBConnection('192.168.1.100', '192.168.1.100')
+smbClient.login('user', 'pass', 'DOMAIN')
+
+rpctransport = SMBTransport(
+    '192.168.1.100',
+    filename=r'\samr',
+    smb_connection=smbClient
+)
+```
+
+## Helper Functions
+
+Most interfaces provide helper functions (prefixed with `h`) that simplify common operations:
+
+```python
+# Instead of manually creating request structures:
+request = samr.SamrConnect()
+request['ServerName'] = NULL
+request['DesiredAccess'] = MAXIMUM_ALLOWED
+resp = dce.request(request)
+
+# Use helper functions:
+resp = samr.hSamrConnect(dce)
+```
+
+## Error Handling
+
+```python
+from impacket.dcerpc.v5.rpcrt import DCERPCException
+from impacket.dcerpc.v5 import samr
+
+try:
+    resp = samr.hSamrConnect(dce)
+except samr.DCERPCSessionError as e:
+    print(f"SAMR Error: {e}")
+    # Error code: 0x5 - ACCESS_DENIED - Access is denied
+except DCERPCException as e:
+    print(f"DCE/RPC Error: {e}")
+```
+
+## Best Practices
+
+1. **Always close handles**: Use `hClose()` or equivalent functions to release server resources
+2. **Use helper functions**: They handle structure creation and error checking
+3. **Check permissions**: Many operations require specific access rights
+4. **Handle exceptions**: DCE/RPC calls can fail with various error codes
+5. **Disconnect properly**: Call `dce.disconnect()` when finished
+
+## References
+
+- [MS-SAMR]: Security Account Manager (SAM) Remote Protocol
+- [MS-LSAD]: Local Security Authority (Domain Policy) Remote Protocol
+- [MS-DRSR]: Directory Replication Service (DRS) Remote Protocol
+- [MS-SCMR]: Service Control Manager Remote Protocol
+- [MS-SRVS]: Server Service Remote Protocol
+
+For complete interface documentation, see the protocol specifications at [Microsoft's Open Specifications](https://docs.microsoft.com/en-us/openspecs/windows_protocols/).

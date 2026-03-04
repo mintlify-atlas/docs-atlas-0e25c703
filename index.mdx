@@ -1,97 +1,332 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: Impacket Documentation
+mode: custom
 ---
 
-## Setting up
+<div className="relative overflow-hidden bg-gradient-to-br from-[#0f3e3d] via-[#004d3a] to-[#00382f] dark:from-[#0f3e3d] dark:via-[#004d3a] dark:to-[#00382f]">
+  <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAxMCAwIEwgMCAwIDAgMTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0icmdiYSgyNTUsMjU1LDI1NSwwLjAzKSIgc3Ryb2tlLXdpZHRoPSIxIi8+PC9wYXR0ZXJuPjwvZGVmcz48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSJ1cmwoI2dyaWQpIi8+PC9zdmc+')] opacity-40"></div>
+  
+  <div className="relative max-w-7xl mx-auto px-6 sm:px-8 py-20 lg:py-28">
+    <div className="lg:grid lg:grid-cols-12 lg:gap-12 items-center">
+      <div className="lg:col-span-7">
+        <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-white mb-6 leading-tight">
+          Python network protocol toolkit
+        </h1>
+        <p className="text-lg sm:text-xl text-gray-200 mb-8 max-w-2xl leading-relaxed">
+          Low-level programmatic access to network protocols. Build powerful security tools with comprehensive SMB, Kerberos, LDAP, and MS-RPC implementations.
+        </p>
+        <div className="flex flex-wrap gap-4">
+          <a 
+            href="/quickstart" 
+            className="inline-flex items-center px-6 py-3 rounded-full bg-[#3fc79a] hover:bg-[#35b088] text-[#00382f] font-semibold text-base transition-colors no-underline shadow-lg"
+          >
+            Get Started
+            <svg className="ml-2 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+            </svg>
+          </a>
+          <a 
+            href="/introduction" 
+            className="inline-flex items-center px-6 py-3 rounded-full border-2 border-white/30 bg-white/10 hover:bg-white/20 text-white font-semibold text-base transition-colors no-underline backdrop-blur-sm"
+          >
+            View Documentation
+          </a>
+        </div>
+        <div className="mt-8 flex flex-wrap items-center gap-6 text-sm text-gray-300">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-[#3fc79a]" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+            </svg>
+            15K+ GitHub Stars
+          </div>
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-[#3fc79a]" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+            </svg>
+            Python 3.9 - 3.13
+          </div>
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-[#3fc79a]" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+            </svg>
+            68+ Example Tools
+          </div>
+        </div>
+      </div>
+      
+      <div className="hidden lg:block lg:col-span-5 mt-12 lg:mt-0">
+        <div className="relative">
+          <div className="absolute -inset-4 bg-gradient-to-r from-[#3fc79a] to-[#046c54] rounded-2xl opacity-20 blur-2xl"></div>
+          <div className="relative bg-[#001a1a] dark:bg-[#001a1a] rounded-2xl border border-[#046c54]/30 p-6 shadow-2xl">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-3 h-3 rounded-full bg-red-500"></div>
+              <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+              <div className="w-3 h-3 rounded-full bg-green-500"></div>
+            </div>
+            <pre className="text-sm text-gray-300 overflow-x-auto">
+{`from impacket.smbconnection import SMBConnection
 
-Get your documentation site up and running in minutes.
+# Connect to remote SMB share
+conn = SMBConnection(
+    remoteName="DC01",
+    remoteHost="192.168.1.10"
+)
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+# Authenticate with credentials
+conn.login("username", "password")
 
-## Make it yours
+# List shares
+shares = conn.listShares()
+for share in shares:
+    print(share['shi1_netname'])`}
+            </pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-Design a docs site that looks great and empowers your users.
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="text-center mb-12">
+    <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Quick start</h2>
+    <p className="text-base text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
+      Get up and running with Impacket in minutes
+    </p>
+  </div>
 
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
-  </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
-  </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
-  </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
+  <Steps>
+    <Step title="Install Impacket">
+      Install via pip or pipx for system-wide access to all tools:
+      
+      ```bash
+      python3 -m pipx install impacket
+      ```
+      
+      Or for development, install from source:
+      
+      ```bash
+      git clone https://github.com/fortra/impacket.git
+      cd impacket
+      python3 -m pip install .
+      ```
+    </Step>
+    
+    <Step title="Connect to an SMB share">
+      Use the high-level SMBConnection API to interact with remote shares:
+      
+      ```python
+      from impacket.smbconnection import SMBConnection
+      
+      conn = SMBConnection("TARGET", "192.168.1.10")
+      conn.login("username", "password")
+      
+      # List files in a share
+      files = conn.listPath("SHARE", "/*")
+      for f in files:
+          print(f.get_longname())
+      ```
+    </Step>
+    
+    <Step title="Use built-in tools">
+      Impacket includes 68+ example scripts for common security operations:
+      
+      ```bash
+      # Dump credentials from a remote system
+      secretsdump.py domain/user:password@192.168.1.10
+      
+      # Execute commands remotely
+      wmiexec.py domain/user:password@192.168.1.10
+      
+      # Extract Kerberos tickets
+      GetUserSPNs.py domain/user:password -dc-ip 192.168.1.5
+      ```
+    </Step>
+  </Steps>
+</div>
 
-## Create beautiful pages
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="text-center mb-12">
+    <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Explore by protocol</h2>
+    <p className="text-base text-gray-600 dark:text-gray-400">
+      Comprehensive implementations of Windows network protocols
+    </p>
+  </div>
 
-Everything you need to create world-class documentation.
+  <CardGroup cols={3}>
+    <Card title="SMB/CIFS" icon="folder-open" href="/protocols/smb">
+      Full SMB1, SMB2, and SMB3 client and server implementation for file sharing and remote operations
+    </Card>
+    <Card title="MS-RPC" icon="network-wired" href="/protocols/msrpc">
+      DCE/RPC over multiple transports with 40+ interface implementations
+    </Card>
+    <Card title="Kerberos" icon="key" href="/protocols/kerberos">
+      Complete Kerberos v5 support for authentication, ticket management, and attacks
+    </Card>
+    <Card title="LDAP" icon="sitemap" href="/protocols/ldap">
+      LDAP protocol for Active Directory queries and ACL manipulation
+    </Card>
+    <Card title="NetBIOS" icon="server" href="/protocols/netbios">
+      NetBIOS name service for network discovery and enumeration
+    </Card>
+    <Card title="MSSQL/TDS" icon="database" href="/protocols/mssql">
+      SQL Server protocol for database operations and command execution
+    </Card>
+  </CardGroup>
+</div>
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="text-center mb-12">
+    <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Popular example tools</h2>
+    <p className="text-base text-gray-600 dark:text-gray-400">
+      Battle-tested scripts for security research and penetration testing
+    </p>
+  </div>
 
-## Need inspiration?
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <a href="/examples/credential-dumping" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#046c54] dark:hover:border-[#046c54] overflow-hidden transition-colors no-underline bg-white dark:bg-[#1a1d27]">
+      <div className="p-6">
+        <div className="flex items-start justify-between mb-3">
+          <div className="p-2 rounded-lg bg-[#046c54]/10 dark:bg-[#046c54]/20">
+            <svg className="w-6 h-6 text-[#046c54]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+          </div>
+          <span className="text-xs font-medium text-gray-500 dark:text-gray-400 px-2.5 py-1 bg-gray-100 dark:bg-[#242838] rounded-full">secretsdump.py</span>
+        </div>
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2 group-hover:text-[#046c54] transition-colors">
+          Credential Dumping
+        </h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+          Extract password hashes, Kerberos keys, and LSA secrets from remote Windows systems
+        </p>
+        <div className="flex items-center text-sm text-[#046c54] dark:text-[#3fc79a] font-medium group-hover:gap-2 transition-all">
+          Learn more
+          <svg className="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+    <a href="/examples/remote-execution" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#046c54] dark:hover:border-[#046c54] overflow-hidden transition-colors no-underline bg-white dark:bg-[#1a1d27]">
+      <div className="p-6">
+        <div className="flex items-start justify-between mb-3">
+          <div className="p-2 rounded-lg bg-[#046c54]/10 dark:bg-[#046c54]/20">
+            <svg className="w-6 h-6 text-[#046c54]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <span className="text-xs font-medium text-gray-500 dark:text-gray-400 px-2.5 py-1 bg-gray-100 dark:bg-[#242838] rounded-full">psexec.py</span>
+        </div>
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2 group-hover:text-[#046c54] transition-colors">
+          Remote Execution
+        </h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+          Execute commands remotely via SMB, WMI, DCOM, or scheduled tasks
+        </p>
+        <div className="flex items-center text-sm text-[#046c54] dark:text-[#3fc79a] font-medium group-hover:gap-2 transition-all">
+          Learn more
+          <svg className="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+
+    <a href="/examples/kerberos-attacks" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#046c54] dark:hover:border-[#046c54] overflow-hidden transition-colors no-underline bg-white dark:bg-[#1a1d27]">
+      <div className="p-6">
+        <div className="flex items-start justify-between mb-3">
+          <div className="p-2 rounded-lg bg-[#046c54]/10 dark:bg-[#046c54]/20">
+            <svg className="w-6 h-6 text-[#046c54]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+            </svg>
+          </div>
+          <span className="text-xs font-medium text-gray-500 dark:text-gray-400 px-2.5 py-1 bg-gray-100 dark:bg-[#242838] rounded-full">GetUserSPNs.py</span>
+        </div>
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2 group-hover:text-[#046c54] transition-colors">
+          Kerberos Attacks
+        </h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+          Kerberoasting, AS-REP roasting, ticket manipulation, and golden ticket attacks
+        </p>
+        <div className="flex items-center text-sm text-[#046c54] dark:text-[#3fc79a] font-medium group-hover:gap-2 transition-all">
+          Learn more
+          <svg className="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+
+    <a href="/examples/ldap-operations" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#046c54] dark:hover:border-[#046c54] overflow-hidden transition-colors no-underline bg-white dark:bg-[#1a1d27]">
+      <div className="p-6">
+        <div className="flex items-start justify-between mb-3">
+          <div className="p-2 rounded-lg bg-[#046c54]/10 dark:bg-[#046c54]/20">
+            <svg className="w-6 h-6 text-[#046c54]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+            </svg>
+          </div>
+          <span className="text-xs font-medium text-gray-500 dark:text-gray-400 px-2.5 py-1 bg-gray-100 dark:bg-[#242838] rounded-full">GetADUsers.py</span>
+        </div>
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2 group-hover:text-[#046c54] transition-colors">
+          LDAP Operations
+        </h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+          Query Active Directory, modify ACLs, and enumerate domain resources
+        </p>
+        <div className="flex items-center text-sm text-[#046c54] dark:text-[#3fc79a] font-medium group-hover:gap-2 transition-all">
+          Learn more
+          <svg className="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+  </div>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="text-center mb-12">
+    <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Resources</h2>
+    <p className="text-base text-gray-600 dark:text-gray-400">
+      Everything you need to build with Impacket
+    </p>
+  </div>
+
+  <CardGroup cols={2}>
+    <Card title="API Reference" icon="code" href="/api/smb">
+      Complete API documentation for all modules and classes
+    </Card>
+    <Card title="Examples & Tools" icon="tools" href="/examples/overview">
+      68+ example scripts with detailed usage instructions
+    </Card>
+    <Card title="GitHub Repository" icon="github" href="https://github.com/fortra/impacket">
+      View source code, report issues, and contribute
+    </Card>
+    <Card title="Security Policy" icon="shield-halved" href="https://github.com/fortra/impacket/security/policy">
+      Report security vulnerabilities responsibly
+    </Card>
+  </CardGroup>
+</div>
+
+<div className="mt-20 mb-16 max-w-5xl mx-auto px-6">
+  <div className="bg-gradient-to-br from-[#046c54] to-[#004d3a] dark:from-[#046c54] dark:to-[#004d3a] rounded-3xl p-8 sm:p-12 text-center relative overflow-hidden">
+    <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAxMCAwIEwgMCAwIDAgMTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0icmdiYSgyNTUsMjU1LDI1NSwwLjA1KSIgc3Ryb2tlLXdpZHRoPSIxIi8+PC9wYXR0ZXJuPjwvZGVmcz48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSJ1cmwoI2dyaWQpIi8+PC9zdmc+')] opacity-30"></div>
+    <div className="relative">
+      <h2 className="text-3xl font-bold text-white mb-4">Ready to get started?</h2>
+      <p className="text-lg text-gray-100 mb-8 max-w-2xl mx-auto">
+        Install Impacket and start building powerful network protocol tools today
+      </p>
+      <a 
+        href="/quickstart" 
+        className="inline-flex items-center px-8 py-3.5 rounded-full bg-white hover:bg-gray-100 text-[#046c54] font-semibold text-base transition-colors no-underline shadow-lg"
+      >
+        Get Started Now
+        <svg className="ml-2 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+        </svg>
+      </a>
+    </div>
+  </div>
+</div>

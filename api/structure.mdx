@@ -1,0 +1,373 @@
+---
+title: 'Structure'
+description: 'Binary data structure parsing and packing'
+---
+
+## Overview
+
+The `Structure` class provides a powerful framework for parsing and packing binary data structures in network protocols. It's used extensively throughout Impacket for defining packet formats, protocol structures, and binary data layouts.
+
+## Basic Usage
+
+```python
+from impacket.structure import Structure
+
+class MyPacket(Structure):
+    structure = (
+        ('Version', '<L=0'),      # Little-endian unsigned long, default 0
+        ('Length', '<H=0'),       # Little-endian unsigned short
+        ('Data', ':'),            # Variable-length data
+    )
+
+# Parse binary data
+packet = MyPacket(data=binary_data)
+print(f"Version: {packet['Version']}")
+print(f"Length: {packet['Length']}")
+
+# Create and pack
+packet = MyPacket()
+packet['Version'] = 1
+packet['Length'] = 100
+packet['Data'] = b'Hello World'
+binary_output = packet.getData()
+```
+
+## Format Specifiers
+
+### Standard Pack Formats
+
+Based on Python's `struct` module:
+
+```python
+'<L'    # Little-endian unsigned long (4 bytes)
+'<H'    # Little-endian unsigned short (2 bytes)  
+'<Q'    # Little-endian unsigned long long (8 bytes)
+'<l'    # Little-endian signed long
+'<h'    # Little-endian signed short
+'B'     # Unsigned byte
+'b'     # Signed byte
+'16s'   # 16-byte string
+```
+
+#### Byte Order
+
+- `<` - Little-endian
+- `>` - Big-endian
+- `!` - Network byte order (big-endian)
+- `=` - Native byte order
+- `@` - Native byte order with native alignment
+
+### Extended Format Specifiers
+
+#### Variable Length Data
+
+```python
+':' # Copy bytes as-is (for Structure objects or raw bytes)
+'z' # Null-terminated string (asciiz)
+'u' # UTF-16LE string with double-null terminator
+```
+
+#### Length Specifiers
+
+```python
+# Field length based on another field
+('DataLen', '<L=0'),
+('_Data', '_-Data', 'self["DataLen"]'),  # Virtual field for length
+('Data', ':'),
+```
+
+#### Arrays
+
+```python
+# Fixed size array
+('Items', '10*<L'),  # Array of 10 unsigned longs
+
+# Variable size array (count in another field)
+('Count', '<L=0'),
+('Items', '<L*<H'),  # First <L is count field, <H is item format
+```
+
+#### Conditional Fields
+
+```python
+# Address field - field only exists if address field is non-zero
+('HasData', '<L=0'),
+('Data', '?&HasData', 'self["HasData"]'),  # Only parsed if HasData != 0
+```
+
+#### Literals
+
+```python
+('Magic', '"\\xef\\xcd\\xab\\x89'),  # Literal bytes that must match
+```
+
+## Structure Definition
+
+### Basic Structure
+
+```python
+class NetworkPacket(Structure):
+    structure = (
+        ('Magic', '<L=0x12345678'),
+        ('Version', '<H=1'),
+        ('Type', '<H=0'),
+        ('Length', '<L=0'),
+        ('_Payload', '_-Payload', 'self["Length"]'),
+        ('Payload', ':'),
+    )
+```
+
+### Nested Structures
+
+```python
+class Header(Structure):
+    structure = (
+        ('Version', '<L=0'),
+        ('Flags', '<L=0'),
+    )
+
+class Packet(Structure):
+    structure = (
+        ('Header', ':', Header),  # Nested structure
+        ('DataLen', '<L=0'),
+        ('_Data', '_-Data', 'self["DataLen"]'),
+        ('Data', ':'),
+    )
+
+# Usage
+packet = Packet(binary_data)
+print(f"Version: {packet['Header']['Version']}")
+```
+
+### Dynamic Structures
+
+```python
+class DynamicPacket(Structure):
+    def __init__(self, data=None, packet_type=0):
+        if packet_type == 1:
+            self.structure = (
+                ('Type', '<H=1'),
+                ('Value', '<L=0'),
+            )
+        else:
+            self.structure = (
+                ('Type', '<H=0'),
+                ('Value', '<Q=0'),
+            )
+        Structure.__init__(self, data)
+```
+
+## Methods
+
+### fromString(data)
+
+Parse binary data into the structure.
+
+```python
+packet = MyPacket()
+packet.fromString(binary_data)
+# Or use constructor
+packet = MyPacket(data=binary_data)
+```
+
+### getData()
+
+Serialize the structure to binary data.
+
+```python
+packet = MyPacket()
+packet['Field1'] = 100
+packet['Field2'] = b'data'
+binary_data = packet.getData()
+```
+
+### dump()
+
+Print structure contents for debugging.
+
+```python
+packet.dump()
+# Output:
+# MyPacket
+#   Field1: 100
+#   Field2: b'data'
+```
+
+### Field Access
+
+```python
+# Dictionary-style access
+packet['FieldName'] = value
+value = packet['FieldName']
+
+# Check if field exists
+if 'FieldName' in packet.fields:
+    print(packet['FieldName'])
+
+# Delete field
+del packet['FieldName']
+```
+
+## Alignment
+
+```python
+class AlignedPacket(Structure):
+    def __init__(self, data=None):
+        Structure.__init__(self, data, alignment=4)  # 4-byte alignment
+
+# Fields will be padded to 4-byte boundaries
+```
+
+## Advanced Examples
+
+### SMB Header
+
+```python
+class SMBHeader(Structure):
+    structure = (
+        ('Protocol', '"\\xffSMB'),      # Literal magic bytes
+        ('Command', 'B=0'),
+        ('ErrorClass', 'B=0'),
+        ('Reserved', 'B=0'),
+        ('ErrorCode', '<H=0'),
+        ('Flags', 'B=0'),
+        ('Flags2', '<H=0'),
+        ('PIDHigh', '<H=0'),
+        ('SecurityFeatures', '8s=""'),
+        ('Reserved2', '<H=0'),
+        ('TID', '<H=0xffff'),
+        ('PID', '<H=0'),
+        ('UID', '<H=0'),
+        ('MID', '<H=0'),
+    )
+```
+
+### Variable Length Array
+
+```python
+class ArrayPacket(Structure):
+    structure = (
+        ('Count', '<L=0'),
+        ('Items', '<L*<H'),  # Array of <H, count in Count field
+    )
+
+# Create
+packet = ArrayPacket()
+packet['Count'] = 3
+packet['Items'] = [100, 200, 300]
+data = packet.getData()
+
+# Parse  
+packet = ArrayPacket(data=data)
+print(packet['Items'])  # [100, 200, 300]
+```
+
+### Conditional Fields
+
+```python
+class ConditionalPacket(Structure):
+    structure = (
+        ('Flags', '<L=0'),
+        ('_OptionalData', '_-OptionalData', '20 if self["Flags"] & 0x01 else 0'),
+        ('OptionalData', ':'),
+    )
+```
+
+### String Handling
+
+```python
+class StringPacket(Structure):  
+    structure = (
+        ('NameLen', '<H=0'),
+        ('_Name', '_-Name', 'self["NameLen"]'),
+        ('Name', ':'),       # Raw bytes
+        ('NullTermStr', 'z'), # Null-terminated
+        ('UnicodeStr', 'u'),  # UTF-16LE with double-null
+    )
+
+packet = StringPacket()
+packet['NameLen'] = 5
+packet['Name'] = b'Hello'
+packet['NullTermStr'] = b'World'
+packet['UnicodeStr'] = 'Test'.encode('utf-16le')
+```
+
+## Encoding Configuration
+
+```python
+class MyStructure(Structure):
+    ENCODING = 'utf-8'  # Default is 'latin-1'
+    
+    structure = (
+        ('Data', ':'),
+    )
+```
+
+## Utility Functions
+
+### hexdump()
+
+Display binary data in hexadecimal format.
+
+```python
+from impacket.structure import hexdump
+
+hexdump(packet.getData())
+# Output:
+#  0000   12 34 56 78 01 00 02 00  48 65 6C 6C 6F           .4Vx....Hello
+```
+
+## Common Patterns
+
+### TLV (Type-Length-Value)
+
+```python
+class TLVRecord(Structure):
+    structure = (
+        ('Type', '<H=0'),
+        ('Length', '<H=0'),
+        ('_Value', '_-Value', 'self["Length"]'),
+        ('Value', ':'),
+    )
+```
+
+### Size Prefix
+
+```python
+class SizedData(Structure):
+    structure = (
+        ('Size', '<L=0'),
+        ('_Data', '_-Data', 'self["Size"]'),
+        ('Data', ':'),
+    )
+```
+
+### Magic Number Validation
+
+```python
+class ValidatedPacket(Structure):
+    structure = (
+        ('Magic', '"PACK'),  # Must be exactly b'PACK'
+        ('Version', '<L=0'),
+    )
+
+try:
+    packet = ValidatedPacket(data=binary_data)
+except Exception as e:
+    print("Invalid packet magic")
+```
+
+## Best Practices
+
+1. **Use virtual fields** (`_-FieldName`) for length calculations
+2. **Set defaults** for fields that have common values
+3. **Use alignment** for structures that require padding  
+4. **Document structures** with comments
+5. **Validate** critical fields in `__init__`
+6. **Use nested structures** for complex protocols
+7. **Test both directions** (packing and unpacking)
+
+## See Also
+
+- [Python struct module](https://docs.python.org/3/library/struct.html) - Base format specifiers
+- SMB, LDAP, and other Impacket protocol implementations for real-world examples

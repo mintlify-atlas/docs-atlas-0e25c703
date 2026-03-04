@@ -1,0 +1,240 @@
+---
+title: Installation
+description: Install Impacket and configure your Python environment
+---
+
+## Installation Methods
+
+<Tabs>
+  <Tab title="pipx (Recommended)">
+    The recommended way to install Impacket system-wide is using `pipx`, which isolates the package in its own virtual environment while making the command-line tools globally available.
+
+    <Steps>
+      <Step title="Install pipx (if needed)">
+        ```bash
+        python3 -m pip install --user pipx
+        python3 -m pipx ensurepath
+        ```
+      </Step>
+      
+      <Step title="Install Impacket">
+        Install the latest stable release:
+        ```bash
+        python3 -m pipx install impacket
+        ```
+      </Step>
+      
+      <Step title="Verify Installation">
+        ```bash
+        python3 -c "import impacket; print(impacket.__version__)"
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+
+  <Tab title="pip">
+    For project-specific installations or when using virtual environments:
+
+    ```bash
+    pip install impacket
+    ```
+
+    <Note>
+      It's recommended to use a virtual environment to avoid conflicts with system packages.
+    </Note>
+  </Tab>
+
+  <Tab title="From Source">
+    Install the development version from the GitHub repository:
+
+    <Steps>
+      <Step title="Clone the Repository">
+        ```bash
+        git clone https://github.com/fortra/impacket.git
+        cd impacket
+        ```
+      </Step>
+      
+      <Step title="Install from Source">
+        Using pipx:
+        ```bash
+        python3 -m pipx install .
+        ```
+
+        Or using pip:
+        ```bash
+        pip install .
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+
+  <Tab title="Docker">
+    Run Impacket in an isolated Docker container:
+
+    <Steps>
+      <Step title="Build the Image">
+        ```bash
+        docker build -t "impacket:latest" .
+        ```
+      </Step>
+      
+      <Step title="Run the Container">
+        ```bash
+        docker run -it --rm "impacket:latest"
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Dependencies
+
+Impacket requires the following Python packages, which are automatically installed:
+
+### Core Dependencies
+
+```txt
+pyasn1>=0.2.3
+pyasn1_modules
+pycryptodomex
+pyOpenSSL
+six
+charset_normalizer
+```
+
+### Protocol-Specific Dependencies
+
+```txt
+ldap3>=2.5,!=2.5.2,!=2.5.0,!=2.6
+ldapdomaindump>=0.9.0
+flask>=1.0
+```
+
+### Platform-Specific
+
+<CodeGroup>
+```txt Windows
+pyreadline3  # Windows only
+```
+
+```txt Linux/macOS
+# No platform-specific dependencies
+```
+</CodeGroup>
+
+## Python Version Requirements
+
+Impacket supports the following Python versions:
+
+<CardGroup cols={3}>
+  <Card title="Python 3.9" icon="python">
+    Fully supported
+  </Card>
+  <Card title="Python 3.10" icon="python">
+    Fully supported
+  </Card>
+  <Card title="Python 3.11" icon="python">
+    Fully supported
+  </Card>
+  <Card title="Python 3.12" icon="python">
+    Fully supported
+  </Card>
+  <Card title="Python 3.13" icon="python">
+    Fully supported
+  </Card>
+</CardGroup>
+
+<Warning>
+  Python 2.x is no longer supported. Please use Python 3.9 or later.
+</Warning>
+
+## Virtual Environment Setup
+
+For development or testing, it's recommended to use a virtual environment:
+
+<CodeGroup>
+```bash venv
+# Create virtual environment
+python3 -m venv impacket-env
+
+# Activate (Linux/macOS)
+source impacket-env/bin/activate
+
+# Activate (Windows)
+impacket-env\Scripts\activate
+
+# Install Impacket
+pip install impacket
+```
+
+```bash conda
+# Create conda environment
+conda create -n impacket python=3.12
+
+# Activate environment
+conda activate impacket
+
+# Install Impacket
+pip install impacket
+```
+</CodeGroup>
+
+## Upgrading Impacket
+
+<Tabs>
+  <Tab title="pipx">
+    ```bash
+    python3 -m pipx upgrade impacket
+    ```
+  </Tab>
+  
+  <Tab title="pip">
+    ```bash
+    pip install --upgrade impacket
+    ```
+  </Tab>
+</Tabs>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="ImportError: No module named 'impacket'">
+    Make sure Impacket is installed in the correct Python environment:
+    
+    ```bash
+    # Check Python version
+    python3 --version
+    
+    # Check if impacket is installed
+    python3 -m pip list | grep impacket
+    
+    # Reinstall if necessary
+    python3 -m pip install --force-reinstall impacket
+    ```
+  </Accordion>
+
+  <Accordion title="Permission denied errors">
+    On Linux/macOS, you may need to use `--user` flag or run with appropriate permissions:
+    
+    ```bash
+    pip install --user impacket
+    ```
+    
+    Or use pipx which handles user installations automatically.
+  </Accordion>
+
+  <Accordion title="SSL/TLS certificate errors">
+    If you encounter SSL errors, update your certificates:
+    
+    ```bash
+    pip install --upgrade certifi
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<Card title="Quick Start Guide" icon="rocket" href="/quickstart">
+  Ready to write your first Impacket script? Continue to the Quick Start guide.
+</Card>

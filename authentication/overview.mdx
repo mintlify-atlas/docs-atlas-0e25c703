@@ -1,0 +1,209 @@
+---
+title: Authentication Overview
+description: Understanding authentication mechanisms in Impacket for Windows network protocols
+---
+
+Impacket provides comprehensive support for Windows authentication protocols, enabling you to authenticate using various credential formats and techniques. This is essential for penetration testing, security research, and legitimate network administration.
+
+## Authentication Protocols
+
+Impacket implements two primary authentication protocols:
+
+### NTLM Authentication
+
+NT LAN Manager (NTLM) is a challenge-response authentication protocol used in Windows networks. Impacket supports:
+
+- **NTLMv1**: Legacy protocol (less secure)
+- **NTLMv2**: Modern protocol with enhanced security (default)
+- **NTLM over HTTP**: For web-based authentication
+
+```python
+from impacket.ntlm import computeResponse, compute_nthash
+
+# Compute NT hash from password
+password = "MyPassword123"
+nthash = compute_nthash(password)
+print(f"NT Hash: {nthash.hex()}")
+```
+
+### Kerberos Authentication
+
+Kerberos is the preferred authentication protocol in Active Directory environments. It uses tickets instead of sending password hashes:
+
+- **TGT (Ticket Granting Ticket)**: Initial ticket for authentication
+- **Service Tickets**: Tickets for accessing specific services
+- **Delegation**: S4U2Self and S4U2Proxy for impersonation
+
+```python
+from impacket.krb5.kerberosv5 import getKerberosTGT
+from impacket.krb5.types import Principal
+from binascii import unhexlify
+
+# Request a TGT using NT hash
+userName = Principal('user', type=1)
+tgt, cipher, oldSessionKey, sessionKey = getKerberosTGT(
+    clientName=userName,
+    password='',
+    domain='CONTOSO.COM',
+    lmhash=unhexlify(''),
+    nthash=unhexlify('8846f7eaee8fb117ad06bdd830b7586c'),
+    kdcHost='dc.contoso.com'
+)
+```
+
+## Credential Formats
+
+Impacket accepts credentials in multiple formats:
+
+### 1. Username and Password
+
+The most straightforward authentication method:
+
+```python
+from impacket.smbconnection import SMBConnection
+
+smbClient = SMBConnection('192.168.1.10', '192.168.1.10')
+smbClient.login('username', 'password', 'DOMAIN')
+```
+
+### 2. NTLM Hashes
+
+Authenticate using LM and NT hashes (pass-the-hash):
+
+```python
+# Format: LMHASH:NTHASH
+lmhash = 'aad3b435b51404eeaad3b435b51404ee'  # Empty LM hash
+nthash = '8846f7eaee8fb117ad06bdd830b7586c'
+
+smbClient = SMBConnection('192.168.1.10', '192.168.1.10')
+smbClient.login('username', '', 'DOMAIN', lmhash, nthash)
+```
+
+### 3. Kerberos Tickets
+
+Use cached Kerberos tickets from ccache files:
+
+```python
+import os
+os.environ['KRB5CCNAME'] = '/tmp/administrator.ccache'
+
+smbClient = SMBConnection('dc.contoso.com', '192.168.1.10')
+smbClient.kerberosLogin('username', '', 'CONTOSO.COM', '', '', '', kdcHost='dc.contoso.com')
+```
+
+### 4. AES Keys
+
+Use AES128 or AES256 Kerberos keys:
+
+```python
+aesKey = 'c4e0e5b1d7c8f5e3a8b2d9f6c4e1a8b5c2d9e6f3a8b5c2d9e6f3a8b5c2d9e6f3'
+
+tgt, cipher, oldSessionKey, sessionKey = getKerberosTGT(
+    clientName=userName,
+    password='',
+    domain='CONTOSO.COM',
+    lmhash=b'',
+    nthash=b'',
+    aesKey=unhexlify(aesKey),
+    kdcHost='dc.contoso.com'
+)
+```
+
+## Global NTLM Configuration
+
+Control NTLMv1 vs NTLMv2 usage:
+
+```python
+import impacket.ntlm as ntlm
+
+# Use NTLMv2 (default and recommended)
+ntlm.USE_NTLMv2 = True
+
+# Fall back to NTLMv1 (only for legacy systems)
+ntlm.USE_NTLMv2 = False
+```
+
+<Warning>
+NTLMv1 is significantly less secure than NTLMv2 and should only be used when absolutely necessary for compatibility with legacy systems.
+</Warning>
+
+## Authentication in Example Scripts
+
+Most Impacket example scripts support all authentication methods through command-line arguments:
+
+```bash
+# Using password
+python psexec.py DOMAIN/user:password@192.168.1.10
+
+# Using NTLM hash
+python psexec.py -hashes :8846f7eaee8fb117ad06bdd830b7586c DOMAIN/user@192.168.1.10
+
+# Using Kerberos
+export KRB5CCNAME=/tmp/admin.ccache
+python psexec.py -k -no-pass DOMAIN/user@dc.contoso.com
+
+# Using AES key
+python psexec.py -aesKey c4e0e5b1d7c8f5e3... DOMAIN/user@dc.contoso.com
+```
+
+## Common Authentication Patterns
+
+### SMB Authentication
+
+```python
+from impacket.smbconnection import SMBConnection
+
+# Create connection
+smbClient = SMBConnection(remoteName, remoteHost)
+
+# Choose authentication method
+if useKerberos:
+    smbClient.kerberosLogin(username, password, domain, lmhash, nthash, aesKey, kdcHost)
+else:
+    smbClient.login(username, password, domain, lmhash, nthash)
+
+# Use the connection
+smbClient.listShares()
+```
+
+### RPC Authentication
+
+```python
+from impacket.dcerpc.v5 import transport
+
+stringBinding = r'ncacn_np:192.168.1.10[\pipe\svcctl]'
+rpctransport = transport.DCERPCTransportFactory(stringBinding)
+
+# Set credentials
+rpctransport.set_credentials(username, password, domain, lmhash, nthash, aesKey)
+rpctransport.set_kerberos(doKerberos, kdcHost)
+
+# Connect
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+```
+
+## Security Considerations
+
+<Info>
+When using pass-the-hash or pass-the-ticket techniques, you're authenticating with credential material that may be sensitive. Always:
+
+- Use secure channels to transmit credentials
+- Clear credential variables after use
+- Follow proper authorization and legal guidelines
+- Prefer Kerberos over NTLM when possible
+</Info>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="NTLM Authentication" icon="key" href="/authentication/ntlm">
+    Deep dive into NTLM protocol and hash computations
+  </Card>
+  <Card title="Kerberos Authentication" icon="ticket" href="/authentication/kerberos-auth">
+    Learn about Kerberos tickets and delegation
+  </Card>
+  <Card title="Pass-the-Hash" icon="fingerprint" href="/authentication/pass-the-hash">
+    Master credential reuse techniques
+  </Card>
+</CardGroup>

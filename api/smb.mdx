@@ -1,0 +1,463 @@
+---
+title: 'SMB'
+description: 'SMB protocol implementation for file sharing and network communication'
+---
+
+## Overview
+
+The `smb` module provides a complete implementation of the SMB (Server Message Block) protocol version 1. This module handles low-level SMB packet construction, authentication, file operations, and named pipe communication.
+
+## Key Classes
+
+### SMB
+
+Main class for SMB protocol implementation.
+
+```python
+from impacket import smb
+
+conn = smb.SMB(remote_name, remote_host)
+conn.login(user, password, domain)
+```
+
+<ParamField path="remote_name" type="str" required>
+  The NetBIOS name of the remote host. Use `'*SMBSERVER'` for auto-detection.
+</ParamField>
+
+<ParamField path="remote_host" type="str" required>
+  IP address or hostname of the remote server
+</ParamField>
+
+<ParamField path="my_name" type="str">
+  Local NetBIOS name. Defaults to local hostname if not specified.
+</ParamField>
+
+<ParamField path="sess_port" type="int" default="139">
+  Port number for NetBIOS session service
+</ParamField>
+
+<ParamField path="timeout" type="int" default="60">
+  Connection timeout in seconds
+</ParamField>
+
+### Methods
+
+#### login()
+
+Authenticate to the SMB server using NTLM.
+
+```python
+conn.login(user, password, domain='', lmhash='', nthash='')
+```
+
+<ParamField path="user" type="str" required>
+  Username for authentication
+</ParamField>
+
+<ParamField path="password" type="str" required>
+  Password for authentication (not used if hashes provided)
+</ParamField>
+
+<ParamField path="domain" type="str" default="''">
+  Domain name for authentication
+</ParamField>
+
+<ParamField path="lmhash" type="str" default="''">
+  LM hash for pass-the-hash authentication
+</ParamField>
+
+<ParamField path="nthash" type="str" default="''">
+  NT hash for pass-the-hash authentication
+</ParamField>
+
+<ResponseField name="return" type="None">
+  Raises `SessionError` if authentication fails
+</ResponseField>
+
+#### connect_tree()
+
+Connect to a shared resource on the server.
+
+```python
+tid = conn.connect_tree(share)
+```
+
+<ParamField path="share" type="str" required>
+  UNC path to the share (e.g., `'\\\\server\\share'`)
+</ParamField>
+
+<ResponseField name="return" type="int">
+  Tree ID (TID) used for subsequent file operations
+</ResponseField>
+
+#### list_path()
+
+List files and directories in a share.
+
+```python
+files = conn.list_path(shareName, path, password=None)
+```
+
+<ParamField path="shareName" type="str" required>
+  Name of the share to list
+</ParamField>
+
+<ParamField path="path" type="str" required>
+  Path relative to the share root (e.g., `'*'` for all files)
+</ParamField>
+
+<ParamField path="password" type="str">
+  Password for password-protected shares
+</ParamField>
+
+<ResponseField name="return" type="list[SharedFile]">
+  List of `SharedFile` objects containing file information
+</ResponseField>
+
+#### open()
+
+Open or create a file on the share.
+
+```python
+fid = conn.open(tid, path, desired_access, share_mode, 
+                creation_options, creation_disposition, 
+                file_attributes)
+```
+
+<ParamField path="tid" type="int" required>
+  Tree ID from `connect_tree()`
+</ParamField>
+
+<ParamField path="path" type="str" required>
+  Path to the file relative to share root
+</ParamField>
+
+<ParamField path="desired_access" type="int" required>
+  Access mask specifying desired operations (e.g., `FILE_READ_DATA`, `FILE_WRITE_DATA`)
+</ParamField>
+
+<ParamField path="share_mode" type="int" required>
+  Share mode flags (e.g., `FILE_SHARE_READ`, `FILE_SHARE_WRITE`)
+</ParamField>
+
+<ParamField path="creation_options" type="int" required>
+  Creation options (e.g., `FILE_NON_DIRECTORY_FILE`)
+</ParamField>
+
+<ParamField path="creation_disposition" type="int" required>
+  Creation disposition (e.g., `FILE_OPEN`, `FILE_CREATE`, `FILE_OVERWRITE_IF`)
+</ParamField>
+
+<ParamField path="file_attributes" type="int" required>
+  File attributes (e.g., `ATTR_NORMAL`, `ATTR_READONLY`)
+</ParamField>
+
+<ResponseField name="return" type="int">
+  File ID (FID) used for read/write operations
+</ResponseField>
+
+#### read_andx()
+
+Read data from an open file.
+
+```python
+data = conn.read_andx(tid, fid, offset=0, max_size=None)
+```
+
+<ParamField path="tid" type="int" required>
+  Tree ID
+</ParamField>
+
+<ParamField path="fid" type="int" required>
+  File ID from `open()`
+</ParamField>
+
+<ParamField path="offset" type="int" default="0">
+  Byte offset to start reading from
+</ParamField>
+
+<ParamField path="max_size" type="int">
+  Maximum bytes to read. Defaults to server's max buffer size.
+</ParamField>
+
+<ResponseField name="return" type="bytes">
+  Data read from the file
+</ResponseField>
+
+#### write_andx()
+
+Write data to an open file.
+
+```python
+bytes_written = conn.write_andx(tid, fid, data, offset=0)
+```
+
+<ParamField path="tid" type="int" required>
+  Tree ID
+</ParamField>
+
+<ParamField path="fid" type="int" required>
+  File ID from `open()`
+</ParamField>
+
+<ParamField path="data" type="bytes" required>
+  Data to write to the file
+</ParamField>
+
+<ParamField path="offset" type="int" default="0">
+  Byte offset to start writing at
+</ParamField>
+
+<ResponseField name="return" type="int">
+  Number of bytes written
+</ResponseField>
+
+#### close()
+
+Close an open file.
+
+```python
+conn.close(tid, fid)
+```
+
+<ParamField path="tid" type="int" required>
+  Tree ID
+</ParamField>
+
+<ParamField path="fid" type="int" required>
+  File ID to close
+</ParamField>
+
+#### logoff()
+
+Log off from the SMB server.
+
+```python
+conn.logoff()
+```
+
+## Constants
+
+### File Attributes
+
+```python
+ATTR_READONLY = 0x001    # Read-only file
+ATTR_HIDDEN = 0x002      # Hidden file
+ATTR_SYSTEM = 0x004      # System file
+ATTR_DIRECTORY = 0x010   # Directory
+ATTR_ARCHIVE = 0x020     # Archive flag
+ATTR_NORMAL = 0x080      # Normal file
+ATTR_TEMPORARY = 0x100   # Temporary file
+ATTR_COMPRESSED = 0x800  # Compressed file
+```
+
+### Access Masks
+
+```python
+FILE_READ_DATA = 0x00000001       # Read file data
+FILE_WRITE_DATA = 0x00000002      # Write file data
+FILE_APPEND_DATA = 0x00000004     # Append to file
+FILE_READ_EA = 0x00000008         # Read extended attributes
+FILE_WRITE_EA = 0x00000010        # Write extended attributes
+FILE_EXECUTE = 0x00000020         # Execute file
+FILE_READ_ATTRIBUTES = 0x00000080 # Read file attributes
+FILE_WRITE_ATTRIBUTES = 0x00000100 # Write file attributes
+DELETE = 0x00010000               # Delete file
+GENERIC_READ = 0x80000000         # Generic read access
+GENERIC_WRITE = 0x40000000        # Generic write access
+GENERIC_ALL = 0x10000000          # All access rights
+```
+
+### Share Access Modes
+
+```python
+FILE_SHARE_READ = 0x00000001      # Allow concurrent read access
+FILE_SHARE_WRITE = 0x00000002     # Allow concurrent write access
+FILE_SHARE_DELETE = 0x00000004    # Allow concurrent delete access
+```
+
+### Creation Disposition
+
+```python
+FILE_SUPERSEDE = 0x00000000    # Replace file if exists, create if not
+FILE_OPEN = 0x00000001         # Open existing file only
+FILE_CREATE = 0x00000002       # Create new file only
+FILE_OPEN_IF = 0x00000003      # Open if exists, create if not
+FILE_OVERWRITE = 0x00000004    # Overwrite existing file only
+FILE_OVERWRITE_IF = 0x00000005 # Overwrite if exists, create if not
+```
+
+## Supporting Classes
+
+### SharedFile
+
+Represents file information returned by `list_path()`.
+
+<ResponseField name="get_longname()" type="str">
+  Returns the full filename
+</ResponseField>
+
+<ResponseField name="get_shortname()" type="str">
+  Returns the 8.3 short filename
+</ResponseField>
+
+<ResponseField name="get_filesize()" type="int">
+  Returns file size in bytes
+</ResponseField>
+
+<ResponseField name="is_directory()" type="bool">
+  Returns True if item is a directory
+</ResponseField>
+
+<ResponseField name="is_readonly()" type="bool">
+  Returns True if file is read-only
+</ResponseField>
+
+<ResponseField name="is_hidden()" type="bool">
+  Returns True if file is hidden
+</ResponseField>
+
+<ResponseField name="get_ctime_epoch()" type="int">
+  Returns creation time as Unix timestamp
+</ResponseField>
+
+<ResponseField name="get_mtime_epoch()" type="int">
+  Returns modification time as Unix timestamp
+</ResponseField>
+
+<ResponseField name="get_atime_epoch()" type="int">
+  Returns access time as Unix timestamp
+</ResponseField>
+
+### SessionError
+
+Exception raised when SMB operations fail.
+
+```python
+try:
+    conn.login(user, password)
+except smb.SessionError as e:
+    print(f"Error: {e}")
+    error_code = e.get_error_code()
+```
+
+<ResponseField name="get_error_code()" type="int">
+  Returns the SMB error code
+</ResponseField>
+
+<ResponseField name="get_error_class()" type="int">
+  Returns the error class
+</ResponseField>
+
+## Usage Examples
+
+### Basic File Operations
+
+```python
+from impacket import smb
+from impacket.smb import FILE_OPEN, FILE_SHARE_READ
+
+# Connect to server
+conn = smb.SMB('*SMBSERVER', '192.168.1.100')
+conn.login('user', 'password', 'DOMAIN')
+
+# Connect to share
+tid = conn.connect_tree('\\\\192.168.1.100\\share')
+
+# List files
+files = conn.list_path('share', '*')
+for f in files:
+    print(f"{f.get_longname()} - {f.get_filesize()} bytes")
+
+# Read a file
+fid = conn.open(tid, 'example.txt', smb.FILE_READ_DATA, 
+                FILE_SHARE_READ, smb.FILE_NON_DIRECTORY_FILE,
+                FILE_OPEN, smb.ATTR_NORMAL)
+data = conn.read_andx(tid, fid)
+conn.close(tid, fid)
+
+print(data.decode('utf-8'))
+
+# Clean up
+conn.logoff()
+```
+
+### Writing Files
+
+```python
+from impacket import smb
+
+conn = smb.SMB('*SMBSERVER', '192.168.1.100')
+conn.login('user', 'password')
+tid = conn.connect_tree('\\\\192.168.1.100\\share')
+
+# Create and write to file
+fid = conn.open(tid, 'output.txt', 
+                smb.FILE_WRITE_DATA | smb.FILE_READ_DATA,
+                smb.FILE_SHARE_READ, smb.FILE_NON_DIRECTORY_FILE,
+                smb.FILE_OVERWRITE_IF, smb.ATTR_NORMAL)
+
+data = b"Hello, SMB World!"
+conn.write_andx(tid, fid, data)
+conn.close(tid, fid)
+
+conn.logoff()
+```
+
+### Pass-the-Hash Authentication
+
+```python
+from impacket import smb
+import hashlib
+
+conn = smb.SMB('*SMBSERVER', '192.168.1.100')
+
+# Authenticate using NTLM hash
+lmhash = 'aad3b435b51404eeaad3b435b51404ee'
+nthash = '8846f7eaee8fb117ad06bdd830b7586c'
+
+conn.login('admin', '', domain='CORP', lmhash=lmhash, nthash=nthash)
+tid = conn.connect_tree('\\\\192.168.1.100\\C$')
+
+# Now you can perform operations
+files = conn.list_path('C$', '*')
+conn.logoff()
+```
+
+## Error Handling
+
+```python
+from impacket import smb
+from impacket.nt_errors import STATUS_ACCESS_DENIED, STATUS_OBJECT_NAME_NOT_FOUND
+
+try:
+    conn = smb.SMB('*SMBSERVER', '192.168.1.100')
+    conn.login('user', 'wrongpassword')
+except smb.SessionError as e:
+    if e.get_error_code() == STATUS_ACCESS_DENIED:
+        print("Access denied - check credentials")
+    else:
+        print(f"SMB Error: {e}")
+```
+
+## Helper Functions
+
+### Time Conversion
+
+```python
+from impacket import smb
+import time
+
+# Convert POSIX timestamp to Windows FILETIME
+posix_time = int(time.time())
+filetime = smb.POSIXtoFT(posix_time)
+
+# Convert FILETIME to POSIX timestamp
+posix_time = smb.FTtoPOSIX(filetime)
+```
+
+## See Also
+
+- [SMBConnection](/api/smbconnection) - High-level SMB client wrapper
+- [SMB3](/api/smbconnection) - SMB2/SMB3 protocol implementation
+- [NTLM](/api/ntlm) - NTLM authentication helpers

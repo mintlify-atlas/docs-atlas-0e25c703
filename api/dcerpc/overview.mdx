@@ -1,0 +1,234 @@
+---
+title: "DCE/RPC Overview"
+description: "Introduction to Impacket's DCE/RPC implementation for Windows remote protocol communication"
+---
+
+## Introduction
+
+Impacket's DCE/RPC (Distributed Computing Environment / Remote Procedure Call) implementation provides comprehensive support for Microsoft's RPC protocol suite. This enables interaction with Windows remote services over various transport protocols.
+
+## Architecture
+
+The DCE/RPC implementation is organized into several layers:
+
+### Transport Layer
+
+Provides protocol-independent RPC communication over multiple transports:
+
+- **Named Pipes (SMB)** - `ncacn_np`
+- **TCP/IP** - `ncacn_ip_tcp`
+- **HTTP** - `ncacn_http`
+- **UDP** - `ncadg_ip_udp`
+- **Local pipes** - `ncalocal`
+
+### RPC Runtime
+
+Core protocol implementation (`rpcrt.py`):
+
+- PDU (Protocol Data Unit) handling
+- BIND/BIND_ACK negotiation
+- Authentication (NTLM, Kerberos, SCHANNEL)
+- Fragmentation and reassembly
+- Context management
+
+### Interface Layer
+
+Protocol-specific implementations in `dcerpc/v5/`:
+
+- Service Control Manager (SCMR)
+- Security Account Manager (SAMR)
+- Local Security Authority (LSAD)
+- Directory Replication Service (DRSUAPI)
+- Windows Management Instrumentation (WMI/DCOM)
+- Many more...
+
+## Basic Usage
+
+### Creating a Connection
+
+```python
+from impacket.dcerpc.v5 import transport, scmr
+
+# Create transport using string binding
+string_binding = r'ncacn_np:192.168.1.10[\\pipe\\svcctl]'
+rpctransport = transport.DCERPCTransportFactory(string_binding)
+rpctransport.set_credentials('username', 'password', 'domain')
+
+# Connect and bind to interface
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+dce.bind(scmr.MSRPC_UUID_SCMR)
+
+# Make RPC calls
+resp = scmr.hROpenSCManagerW(dce)
+scHandle = resp['lpScHandle']
+
+# Clean up
+dce.disconnect()
+```
+
+### String Binding Format
+
+RPC endpoints are specified using DCE string bindings:
+
+```
+[uuid@]protocol_sequence:network_address[endpoint,options]
+```
+
+Examples:
+```python
+# Named pipe over SMB
+'ncacn_np:192.168.1.10[\\pipe\\svcctl]'
+
+# TCP/IP with dynamic endpoint
+'ncacn_ip_tcp:192.168.1.10'
+
+# HTTP with RPC proxy
+'ncacn_http:192.168.1.10[593,RpcProxy=proxy.corp.com:443]'
+
+# With UUID specification
+'12345678-1234-ABCD-EF00-0123456789AB@ncacn_ip_tcp:192.168.1.10'
+```
+
+## Authentication
+
+### NTLM Authentication
+
+```python
+from impacket.dcerpc.v5 import transport
+
+rpctransport = transport.DCERPCTransportFactory(string_binding)
+rpctransport.set_credentials(
+    username='user',
+    password='pass',
+    domain='DOMAIN',
+    lmhash='',
+    nthash=''  # Pass hash if available
+)
+
+dce = rpctransport.get_dce_rpc()
+dce.set_auth_level(RPC_C_AUTHN_LEVEL_PKT_PRIVACY)
+dce.connect()
+```
+
+### Kerberos Authentication
+
+```python
+rpctransport.set_kerberos(True, kdcHost='dc.domain.com')
+rpctransport.set_credentials(
+    username='user',
+    password='pass',
+    domain='DOMAIN.COM'
+)
+
+dce = rpctransport.get_dce_rpc()
+dce.connect()
+```
+
+## Authentication Levels
+
+From `rpcrt.py:112-118`:
+
+```python
+RPC_C_AUTHN_LEVEL_NONE          = 1  # No authentication
+RPC_C_AUTHN_LEVEL_CONNECT       = 2  # Authenticate on connect
+RPC_C_AUTHN_LEVEL_CALL          = 3  # Authenticate per call
+RPC_C_AUTHN_LEVEL_PKT           = 4  # Authenticate packets
+RPC_C_AUTHN_LEVEL_PKT_INTEGRITY = 5  # Packet integrity
+RPC_C_AUTHN_LEVEL_PKT_PRIVACY   = 6  # Packet encryption
+```
+
+## Error Handling
+
+```python
+from impacket.dcerpc.v5.rpcrt import DCERPCException
+from impacket.dcerpc.v5 import scmr
+
+try:
+    resp = scmr.hROpenSCManagerW(dce)
+except scmr.DCERPCSessionError as e:
+    print(f'Error code: 0x{e.get_error_code():x}')
+    print(f'Error: {e}')
+except DCERPCException as e:
+    print(f'RPC Error: {e}')
+```
+
+## Common Status Codes
+
+From `rpcrt.py:149-200`:
+
+| Code | Description |
+|------|-------------|
+| `0x1C010002` | `nca_s_op_rng_error` - Bad operation number |
+| `0x1C010003` | `nca_s_unk_if` - Unknown interface |
+| `0x1C01000B` | `nca_s_proto_error` - Protocol error |
+| `0x00000005` | `rpc_s_access_denied` - Access denied |
+| `0x000006D8` | `rpc_fault_cant_perform` - Cannot perform operation |
+
+## PDU Types
+
+From `rpcrt.py:40-60`:
+
+```python
+MSRPC_REQUEST   = 0x00  # Request PDU
+MSRPC_RESPONSE  = 0x02  # Response PDU
+MSRPC_FAULT     = 0x03  # Fault PDU
+MSRPC_BIND      = 0x0B  # Bind PDU
+MSRPC_BINDACK   = 0x0C  # Bind acknowledgment
+MSRPC_ALTERCTX  = 0x0E  # Alter context
+MSRPC_AUTH3     = 0x10  # Third leg of auth
+```
+
+## Best Practices
+
+### Connection Management
+
+```python
+# Use context manager pattern
+class DCERPCConnection:
+    def __init__(self, string_binding):
+        self.transport = transport.DCERPCTransportFactory(string_binding)
+        self.dce = None
+    
+    def __enter__(self):
+        self.dce = self.transport.get_dce_rpc()
+        self.dce.connect()
+        return self.dce
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.dce:
+            self.dce.disconnect()
+
+# Usage
+with DCERPCConnection(string_binding) as dce:
+    dce.bind(scmr.MSRPC_UUID_SCMR)
+    # Make calls...
+```
+
+### Reusing Connections
+
+```python
+# Share SMB connection across multiple RPC interfaces
+from impacket.smbconnection import SMBConnection
+from impacket.dcerpc.v5.transport import SMBTransport
+
+smbConn = SMBConnection(remoteName, remoteHost)
+smbConn.login(username, password, domain)
+
+# Create transports with shared connection
+transport1 = SMBTransport(remoteName, filename='\\pipe\\svcctl', 
+                         smb_connection=smbConn)
+transport2 = SMBTransport(remoteName, filename='\\pipe\\samr',
+                         smb_connection=smbConn)
+
+dce1 = transport1.get_dce_rpc()
+dce2 = transport2.get_dce_rpc()
+
+# Both share the same SMB connection
+```
+
+## See Also
+
+- [Transport Layer](/api/dcerpc/transport) - Detailed transport options
+- [V5 Interfaces](/api/dcerpc/v5-interfaces) - Available RPC interfaces
+- [DCOM/WMI](/api/dcerpc/dcom) - Distributed COM and WMI

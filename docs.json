@@ -1,122 +1,135 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Impacket",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#046c54",
+    "light": "#8ce4f4",
+    "dark": "#3c9e9c"
   },
-  "favicon": "/favicon.svg",
+
+  "logo": {
+    "light": "https://media.brand.dev/20468ab9-82f2-43d6-ae1e-2b5316225000.svg",
+    "dark": "https://media.brand.dev/20468ab9-82f2-43d6-ae1e-2b5316225000.svg"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/fortra/impacket"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/fortra/impacket"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
-              "quickstart",
-              "development"
+              "introduction",
+              "installation",
+              "quickstart"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Protocols",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "protocols/smb",
+              "protocols/msrpc",
+              "protocols/kerberos",
+              "protocols/ldap",
+              "protocols/netbios",
+              "protocols/mssql"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Authentication",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "authentication/overview",
+              "authentication/ntlm",
+              "authentication/kerberos-auth",
+              "authentication/pass-the-hash"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Examples & Tools",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "examples/overview",
+              "examples/remote-execution",
+              "examples/credential-dumping",
+              "examples/kerberos-attacks",
+              "examples/ldap-operations",
+              "examples/smb-operations"
+            ]
+          },
+          {
+            "group": "Advanced Topics",
+            "pages": [
+              "advanced/dcerpc-interfaces",
+              "advanced/dcom",
+              "advanced/packet-crafting",
+              "advanced/relay-attacks"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Core Modules",
             "pages": [
-              "api-reference/introduction"
+              "api/smb",
+              "api/smbconnection",
+              "api/smbserver",
+              "api/nmb",
+              "api/ntlm"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "DCE/RPC",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/dcerpc/overview",
+              "api/dcerpc/transport",
+              "api/dcerpc/v5-interfaces",
+              "api/dcerpc/dcom"
+            ]
+          },
+          {
+            "group": "Kerberos",
+            "pages": [
+              "api/krb5/overview",
+              "api/krb5/asn1",
+              "api/krb5/ccache",
+              "api/krb5/crypto",
+              "api/krb5/kerberosv5"
+            ]
+          },
+          {
+            "group": "LDAP",
+            "pages": [
+              "api/ldap/overview",
+              "api/ldap/ldap",
+              "api/ldap/ldaptypes"
+            ]
+          },
+          {
+            "group": "Utilities",
+            "pages": [
+              "api/structure",
+              "api/crypto",
+              "api/dpapi",
+              "api/ese",
+              "api/winregistry"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

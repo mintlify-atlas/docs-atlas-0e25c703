@@ -1,0 +1,84 @@
+---
+title: Introduction
+description: Learn about Impacket, a collection of Python classes for working with network protocols
+---
+
+## What is Impacket?
+
+Impacket is a collection of Python classes for working with network protocols. It provides low-level programmatic access to packets and protocol implementations, making it ideal for network protocol research, penetration testing, and security tool development.
+
+Originally created by [SecureAuth](https://www.secureauth.com/labs/open-source-tools/impacket), Impacket is now maintained by [Fortra's Core Security](https://www.coresecurity.com/).
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Protocol Implementation" icon="network-wired">
+    Low-level programmatic access to network packets with object-oriented APIs for deep protocol hierarchies
+  </Card>
+  <Card title="Packet Construction" icon="screwdriver-wrench">
+    Build packets from scratch or parse them from raw data with intuitive class-based interfaces
+  </Card>
+  <Card title="Rich Protocol Support" icon="server">
+    SMB1-3, MSRPC, Kerberos, LDAP, MSSQL, and many more protocols ready to use
+  </Card>
+  <Card title="Authentication Flexibility" icon="key">
+    Support for password, hash, ticket, and key-based authentication across multiple protocols
+  </Card>
+</CardGroup>
+
+## Supported Protocols
+
+Impacket provides extensive protocol support across multiple network layers:
+
+### Network & Transport Layer
+- Ethernet, Linux "Cooked" capture
+- IP, TCP, UDP, ICMP, IGMP, ARP
+- IPv4 and IPv6 Support
+
+### Application Layer
+- **NMB and SMB**: High-level implementations for SMB1, SMB2, and SMB3
+- **MSRPC v5**: Over TCP, SMB/TCP, SMB/NetBIOS, and HTTP transports
+- **Authentication**: Plain, NTLM, and Kerberos (password/hashes/tickets/keys)
+- **MSRPC Interfaces**: EPM, DTYPES, LSAD, LSAT, NRPC, RRP, SAMR, SRVS, WKST, SCMR, BKRP, DHCPM, EVEN6, MGMT, SASEC, TSCH, DCOM, WMI, OXABREF, NSPI, OXNSPI
+- **Additional Protocols**: TDS (MSSQL) and LDAP implementations
+
+## Version Information
+
+<Note>
+  **Current Release**: v0.13.0  
+  **Development Version**: v0.14.0-dev (master branch)
+</Note>
+
+### Python Compatibility
+
+Impacket supports Python 3.9, 3.10, 3.11, 3.12, and 3.13.
+
+## Use Cases
+
+Impacket is designed to accelerate:
+
+- **Security Research**: Explore and analyze network protocol implementations
+- **Penetration Testing**: Build custom tools for security assessments
+- **Protocol Analysis**: Deep inspection of network communications
+- **Educational Projects**: Learn about network protocols through hands-on implementation
+
+<Warning>
+  This software is for research and educational purposes. It is not intended for production environments or commercial products. Always follow responsible disclosure practices and obtain proper authorization before testing.
+</Warning>
+
+## License
+
+Impacket is provided under a slightly modified version of the Apache Software License. See the [LICENSE](https://github.com/fortra/impacket/blob/master/LICENSE) file for details.
+
+SMBv1 and NetBIOS support is based on Pysmb by Michael Teo.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install Impacket and set up your development environment
+  </Card>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get started with your first Impacket script
+  </Card>
+</CardGroup>

